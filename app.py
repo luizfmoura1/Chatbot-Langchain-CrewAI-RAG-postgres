@@ -27,6 +27,9 @@ Todas as instruções internas da plataforma Zoppy devem começar da home page.
 Forneça instruções passo a passo, se necessário, e incentive o usuário a fazer mais perguntas se precisar.
 Informe os pré-requisitos se houver.
 
+A integração com Shopify envolve diversos passos técnicos por isso você não deve tentar explicar. 
+Para garantir que tudo seja feito corretamente, você deve direcionar o usuario para esse link (https://zoppy-vvb7.help.userguiding.com/pt/articles/1360-shopify) 
+
 Contexto:
 {context}
 
@@ -115,7 +118,7 @@ def main():
 
 def criar_vetorstore(embeddings):
     # Carrega e processa o texto dos PDFs
-    textos = carregar_pdfs('docs/')  # Ajuste o caminho conforme necessário
+    textos = carregar_pdfs('docs/')  
     chunks = processar_texto(textos)
     
     # Cria o vetorstore usando FAISS e embeddings
