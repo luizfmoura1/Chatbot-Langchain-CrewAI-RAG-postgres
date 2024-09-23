@@ -23,6 +23,7 @@ Todas as instruções internas da plataforma Zoppy devem começar da home page.
 Forneça instruções passo a passo, se necessário, e incentive o usuário a fazer mais perguntas se precisar.
 Informe os pré-requisitos se houver.
 
+Caso o usuario pergunte sobre integrar a Zoppy com a shopify responda:
 A integração com Shopify envolve diversos passos técnicos por isso você não deve tentar explicar. 
 Para garantir que tudo seja feito corretamente, você deve direcionar o usuario para esse link (https://zoppy-vvb7.help.userguiding.com/pt/articles/1360-shopify) 
 
@@ -38,6 +39,7 @@ Resposta:
 
 def main():
     st.set_page_config(page_title="💬 Mike-Gpt", page_icon="🤖")
+
     st.title("💬 Mike-Gpt")
     st.caption("🚀 Pergunte para nossa IA especialista em Zoppy")
 
@@ -79,7 +81,7 @@ def main():
                     model_name="gpt-4o",
                     max_tokens=1000,
                 ),
-                retriever=vetorstore.as_retriever(search_kwargs={"k": 5}),
+                retriever=vetorstore.as_retriever(search_kwargs={"k": 3}),
                 memory=st.session_state.memory,
                 chain_type="stuff",
                   combine_docs_chain_kwargs={
