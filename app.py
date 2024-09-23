@@ -18,45 +18,25 @@ load_dotenv()
 # Recupera a chave da API da OpenAI
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
-# Prompt para a etapa de mapeamento
-prompt_map = PromptTemplate(
+prompt_template = PromptTemplate(
     input_variables=["context", "question"],
     template="""
-Você é um assistente especializado em ajudar com tarefas dentro do software Zoppy. Sua resposta deve seguir este formato:
-
-1. **Introdução**: Dê uma breve introdução ao tópico.
-2. **Passos Detalhados**: Liste os passos de forma clara e concisa.
-3. **Conclusão**: Forneça uma conclusão com orientações adicionais, se aplicável.
+Você é um assistente virtual especializado em ajudar usuários com duvidas na plataforma Zoppy. 
+Responda à pergunta do usuário de forma direta, amigável e clara. 
+Todas as instruções internas da plataforma Zoppy devem começar da home page.
+Forneça instruções passo a passo, se necessário, e incentive o usuário a fazer mais perguntas se precisar.
+Informe os pré-requisitos se houver.
 
 Contexto:
 {context}
 
 Pergunta:
 {question}
-
-Respostas:
-"""
-)
-
-# Prompt para a etapa de redução
-prompt_reduce = PromptTemplate(
-    input_variables=["summaries", "question"],
-    template="""
-Você é um assistente especializado em ajudar com tarefas dentro do software Zoppy. Sua resposta deve seguir este formato:
-
-1. **Introdução**: Dê uma breve introdução ao tópico.
-2. **Passos Detalhados**: Liste os passos de forma clara e concisa.
-3. **Conclusão**: Forneça uma conclusão com orientações adicionais, se aplicável.
-
-Resumos:
-{summaries}
-
-Pergunta:
-{question}
-
+sh
 Resposta:
 """
 )
+
 
 def main():
     # Configuração da página
@@ -106,17 +86,15 @@ def main():
             qa = ConversationalRetrievalChain.from_llm(
                 llm=ChatOpenAI(
                     openai_api_key=OPENAI_API_KEY,
-                    temperature=0.2,
+                    temperature=0,
                     model_name="gpt-4o",
-                    max_tokens=500,
-                    top_p=0.9
+                    max_tokens=1000,
                 ),
-                retriever=vetorstore.as_retriever(search_kwargs={"k": 3}),
+                retriever=vetorstore.as_retriever(search_kwargs={"k": 5}),
                 memory=st.session_state.memory,
-                chain_type="map_reduce",
-                combine_docs_chain_kwargs={
-                    "question_prompt": prompt_map,
-                    "combine_prompt": prompt_reduce
+                chain_type="stuff",
+                  combine_docs_chain_kwargs={
+                    "prompt": prompt_template
                 },
                 verbose=True
             )
