@@ -79,7 +79,7 @@ def main():
                     openai_api_key=OPENAI_API_KEY,
                     temperature=0,
                     model_name="gpt-4o",
-                    max_tokens=1000,
+                    max_tokens=500,
                 ),
                 retriever=vetorstore.as_retriever(search_kwargs={"k": 3}),
                 memory=st.session_state.memory,
