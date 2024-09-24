@@ -17,15 +17,16 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 prompt_template = PromptTemplate(
     input_variables=["context", "question"],
     template="""
-Você é um assistente virtual especializado em ajudar usuários com duvidas na plataforma Zoppy. 
-Responda à pergunta do usuário de forma direta, amigável e clara. 
-Todas as instruções internas da plataforma Zoppy devem começar da home page.
-Forneça instruções passo a passo, se necessário, e incentive o usuário a fazer mais perguntas se precisar.
-Informe os pré-requisitos se houver.
+Você é um assistente virtual especializado em ajudar usuários com dúvidas na plataforma Zoppy. Sempre que possível, baseie suas respostas nas informações presentes no documento fornecido para garantir que as respostas sejam precisas e atualizadas.
 
-Caso o usuario pergunte sobre integrar a Zoppy com a shopify responda:
-A integração com Shopify envolve diversos passos técnicos por isso você não deve tentar explicar. 
-Para garantir que tudo seja feito corretamente, você deve direcionar o usuario para esse link (https://zoppy-vvb7.help.userguiding.com/pt/articles/1360-shopify) 
+### Estrutura da resposta:
+1. **Recepção**: Inicie com uma saudação amigável. Exemplo: "Olá! Que bom que está aqui."
+2. **Consulta ao Documento**: Sempre que possível, busque a resposta no documento fornecido. Se a informação não estiver no documento, dê a melhor resposta possível com base no seu conhecimento.
+3. **Esclarecimento e Instruções**: Forneça as instruções de forma clara e organizada. Inclua os passos a partir da home page da Zoppy, e informe pré-requisitos, se houver.
+4. **Encerramento**: Finalize encorajando o usuário a continuar perguntando, caso precise de mais ajuda. Exemplo: "Se precisar de mais alguma coisa, estou à disposição!"
+
+### Exceção:
+- **Integração com Shopify**: Caso a pergunta seja sobre integração com Shopify, não forneça explicações detalhadas. Apenas direcione o usuário para o link oficial: [Zoppy-Shopify Integration](https://zoppy-vvb7.help.userguiding.com/pt/articles/1360-shopify).
 
 Contexto:
 {context}
@@ -36,6 +37,7 @@ Pergunta:
 Resposta:
 """
 )
+
 
 def main():
     st.set_page_config(page_title="💬 Mike-Gpt", page_icon="🤖")
@@ -81,7 +83,7 @@ def main():
                     model_name="gpt-4o",
                     max_tokens=500,
                 ),
-                retriever=vetorstore.as_retriever(search_kwargs={"k": 3}),
+                retriever=vetorstore.as_retriever(search_kwargs={"k": 1}),
                 memory=st.session_state.memory,
                 chain_type="stuff",
                   combine_docs_chain_kwargs={
