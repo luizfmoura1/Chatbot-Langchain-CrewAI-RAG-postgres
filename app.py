@@ -1,6 +1,5 @@
 import os
 import streamlit as st
-from utils.pdf_loader import carregar_pdfs
 from utils.exel_loader import carregar_excels
 from utils.text_processing import processar_texto
 from langchain.chains import ConversationalRetrievalChain
@@ -87,8 +86,8 @@ def main():
                 llm=ChatOpenAI(
                     openai_api_key=OPENAI_API_KEY,
                     temperature=0,
-                    model_name="gpt-4o-mini",  
-                    max_tokens=500,
+                    model_name="gpt-4o-mini",
+                    max_tokens=1000
                 ),
                 retriever=vetorstore.as_retriever(search_kwargs={"k": 1}),
                 memory=st.session_state.memory,
