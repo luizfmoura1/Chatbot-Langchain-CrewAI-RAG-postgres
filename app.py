@@ -1,6 +1,6 @@
 import os
 import streamlit as st
-from utils.exel_loader import carregar_excels
+import psycopg2
 from utils.text_processing import processar_texto
 from langchain.chains import ConversationalRetrievalChain
 from langchain.chat_models import ChatOpenAI
@@ -29,6 +29,34 @@ Pergunta:
 Resposta:
 """
 )
+
+
+# Conexão com o PostgreSQL
+def conectar_postgresql():
+    try:
+        connection = psycopg2.connect(
+            host=os.getenv('POSTGRES_HOST'),
+            database=os.getenv('POSTGRES_DB'),
+            user=os.getenv('POSTGRES_USER'),
+            password=os.getenv('POSTGRES_PASSWORD')
+        )
+        print("Conexão com o PostgreSQL estabelecida com sucesso.")
+        return connection
+    except Exception as e:
+        st.error(f"Erro ao conectar ao PostgreSQL: {e}")
+        st.stop()
+
+# Carregar dados do PostgreSQL
+def carregar_dados_postgresql():
+    connection = conectar_postgresql()
+    cursor = connection.cursor()
+    cursor.execute("SELECT conteudo FROM documentos")  # Ajuste a consulta conforme necessário
+    textos = " ".join([row[0] for row in cursor.fetchall()])
+    cursor.close()
+    connection.close()
+    return textos
+
+
 
 def main():
     st.set_page_config(page_title="💬 Chat-oppem", page_icon="🤖")
@@ -114,11 +142,12 @@ def main():
         st.session_state.messages.append({"role": "assistant", "content": resposta['answer']})
         st.chat_message("assistant").write(resposta['answer'])
 
+# Função para criar o vetorstore a partir do PostgreSQL
 def criar_vetorstore(embeddings):
-    textos = carregar_excels('docs/')  
+    textos = carregar_dados_postgresql()  # Carrega dados do banco PostgreSQL
     print(f"Texto extraído: {len(textos)} caracteres")
     if not textos.strip():
-        raise ValueError("Nenhum texto foi extraído das planilhas Excel.")
+        raise ValueError("Nenhum texto foi extraído do banco de dados PostgreSQL.")
     
     chunks = processar_texto(textos)
     print(f"Número de chunks criados: {len(chunks)}")
