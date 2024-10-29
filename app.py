@@ -35,11 +35,11 @@ Resposta:
 def conectar_postgresql():
     try:
         connection = psycopg2.connect(
-            host=os.getenv('POSTGRES_HOST'),
-            database=os.getenv('POSTGRES_DB'),
-            user=os.getenv('POSTGRES_USER'),
-            password=os.getenv('POSTGRES_PASSWORD'),
-            port=8780
+            host='localhost',
+            database='postgres',
+            user='postgres',
+            password='123456',
+            port=5432
         )
         print("Conexão com o PostgreSQL estabelecida com sucesso.")
         return connection
@@ -51,12 +51,15 @@ def conectar_postgresql():
 def carregar_dados_postgresql():
     connection = conectar_postgresql()
     cursor = connection.cursor()
-    # Substitua 'nova_tabela' pelo nome da tabela desejada
-    cursor.execute("SELECT conteudo FROM nova_tabela")  
-    textos = " ".join([row[0] for row in cursor.fetchall()])
+    cursor.execute("SELECT * FROM public.actor")
+    
+    # Concatenando células de cada linha, e depois concatenando as linhas
+    textos = " ".join([" ".join(map(str, row)) for row in cursor.fetchall()])
+    
     cursor.close()
     connection.close()
     return textos
+
 
 
 
@@ -162,5 +165,11 @@ def criar_vetorstore(embeddings):
     print("Vetorstore criado e salvo com sucesso.")
     return vetorstore
 
+
+
 if __name__ == "__main__":
+    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+    criar_vetorstore(embeddings)
     main()
+
+    
