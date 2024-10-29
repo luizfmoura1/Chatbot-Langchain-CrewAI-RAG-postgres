@@ -38,7 +38,8 @@ def conectar_postgresql():
             host=os.getenv('POSTGRES_HOST'),
             database=os.getenv('POSTGRES_DB'),
             user=os.getenv('POSTGRES_USER'),
-            password=os.getenv('POSTGRES_PASSWORD')
+            password=os.getenv('POSTGRES_PASSWORD'),
+            port=8780
         )
         print("Conexão com o PostgreSQL estabelecida com sucesso.")
         return connection
@@ -50,11 +51,13 @@ def conectar_postgresql():
 def carregar_dados_postgresql():
     connection = conectar_postgresql()
     cursor = connection.cursor()
-    cursor.execute("SELECT conteudo FROM documentos")  # Ajuste a consulta conforme necessário
+    # Substitua 'nova_tabela' pelo nome da tabela desejada
+    cursor.execute("SELECT conteudo FROM nova_tabela")  
     textos = " ".join([row[0] for row in cursor.fetchall()])
     cursor.close()
     connection.close()
     return textos
+
 
 
 
