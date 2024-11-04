@@ -3,12 +3,14 @@ import streamlit as st
 import psycopg2
 from utils.text_processing import processar_texto
 from langchain.chains import ConversationalRetrievalChain
-from langchain.chat_models import ChatOpenAI
-from langchain.vectorstores import FAISS
-from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain_community.chat_models import ChatOpenAI
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import OpenAIEmbeddings
 from langchain.memory import ConversationBufferMemory
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
+from crewai import Agent, Task, Crew, Process
+from crewai_tools import tool
 
 load_dotenv()
 
@@ -18,7 +20,7 @@ prompt_template = PromptTemplate(
     input_variables=["context", "question"],
     template="""
 Você é um assistente virtual especializado em ajudar usuários com dúvidas relacionadas ao banco de dados vinculado. Sempre que possível, baseie suas respostas nas informações presentes no banco de dados Postgres vinculado para garantir que as respostas sejam precisas e atualizadas.
-Lembre-se seja sempre direto e objetivo em suas respostas, fornecendo instruções claras e concisas para ajudar o usuário a resolver seu problema. Você DEVE responder apenas perguntas relacionadas ao banco de dados Postgres vinculado!
+Lembre-se seja sempre direto e objetivo em suas respostas, fornecendo instruções claras e concisas para ajudar o usuário a resolver seu problema. Você DEVE responder apenas perguntas relacionadas ao banco de dados Postgres vinculado! Você deve responder as perguntas relacionadas ao banco, e não solicitar uma query!!
 
 Contexto:
 {context}
@@ -29,7 +31,6 @@ Pergunta:
 Resposta:
 """
 )
-
 
 # Conexão com o PostgreSQL
 def conectar_postgresql():
@@ -47,26 +48,85 @@ def conectar_postgresql():
         st.error(f"Erro ao conectar ao PostgreSQL: {e}")
         st.stop()
 
+# Função para obter o esquema da tabela "actor"
+def get_actor_schema():
+    connection = conectar_postgresql()
+    cursor = connection.cursor()
+    cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'actor'")
+    columns = cursor.fetchall()
+    cursor.close()
+    connection.close()
+    return ", ".join([column[0] for column in columns])
+
+# Função de execução de consulta para o agente SQL com depuração
+@tool("Execute query DB tool")
+def run_query(query: str):
+    """Execute a query no banco de dados e retorne os dados."""
+    connection = conectar_postgresql()
+    cursor = connection.cursor()
+
+    # Modificação para lidar com case insensitive
+    if "WHERE first_name =" in query:
+        # Ajusta a consulta para tornar case-insensitive na coluna first_name
+        query = query.replace("first_name =", "LOWER(first_name) = LOWER(").replace("';", "');")
+
+    cursor.execute(query)
+    result = cursor.fetchall()
+    print("Resultado da query:", result)  # Exibe o resultado da query para depuração
+    cursor.close()
+    connection.close()
+    return result
+
+# Configuração do agente SQL com CrewAI
+def configurar_agente_sql(embeddings):
+    actor_schema_info = get_actor_schema()  # Obtém as colunas da tabela "actor"
+
+    sql_developer_agent = Agent(
+        role='Senior SQL developer',
+        goal="Return data from the 'actor' table by running the Execute query DB tool.",
+        backstory=f"""Você está conectado ao banco de dados que contém a tabela 'actor' com as seguintes colunas: {actor_schema_info}.
+                      Use o Execute query DB tool para realizar consultas específicas nesta tabela e retornar os resultados.""",
+        tools=[run_query],
+        allow_delegation=False,
+        verbose=True,
+        llm=ChatOpenAI(openai_api_key=OPENAI_API_KEY, temperature=0)
+    )
+    
+    sql_developer_task = Task(
+        description="""Construir uma consulta SQL para responder a pergunta: {question} usando a tabela 'actor'. Use o esquema fornecido.""",
+        expected_output="""Retornar dados da tabela 'actor'.""",
+        agent=sql_developer_agent
+    )
+    
+    crew = Crew(
+        agents=[sql_developer_agent],
+        tasks=[sql_developer_task],
+        process=Process.sequential,
+        manager_llm=ChatOpenAI(openai_api_key=OPENAI_API_KEY)
+    )
+    return crew
+
 # Carregar dados do PostgreSQL
 def carregar_dados_postgresql():
     connection = conectar_postgresql()
     cursor = connection.cursor()
     cursor.execute("SELECT * FROM public.actor")
-    
-    # Concatenando células de cada linha, e depois concatenando as linhas
     textos = " ".join([" ".join(map(str, row)) for row in cursor.fetchall()])
-    
     cursor.close()
     connection.close()
     return textos
 
+# Função para criar o vetorstore
+def criar_vetorstore(embeddings):
+    textos = carregar_dados_postgresql()
+    chunks = processar_texto(textos)
+    vetorstore = FAISS.from_texts(chunks, embedding=embeddings)
+    vetorstore.save_local('vectorstore/faiss_index')
+    return vetorstore
 
-
-
-
+# Main com integração do CrewAI e depuração de kickoff()
 def main():
     st.set_page_config(page_title="💬 Chat-oppem", page_icon="🤖")
-
     st.title("💬 Chat-oppem")
     st.caption("🚀 Pergunte para nossa IA especialista em Oppem")
 
@@ -82,94 +142,70 @@ def main():
         st.session_state.messages.append({"role": "user", "content": user_input})
         st.chat_message("user").write(user_input)
 
-        # Inicialize Embeddings
-        try:
-            embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-            print("Embeddings inicializados com sucesso.")
-        except ImportError as e:
-            st.error(f"Erro ao importar OpenAIEmbeddings: {e}")
-            st.stop()
-        except Exception as e:
-            st.error(f"Erro ao inicializar OpenAIEmbeddings: {e}")
-            st.stop()
+        embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
 
-        # Carregue ou crie o vetorstore
         if os.path.exists('vectorstore/faiss_index'):
-            try:
-                vetorstore = FAISS.load_local('vectorstore/faiss_index', embeddings, allow_dangerous_deserialization=True)
-                print("Vetorstore FAISS carregado com sucesso.")
-            except Exception as e:
-                st.error(f"Erro ao carregar o vetorstore FAISS: {e}")
-                st.stop()
+            vetorstore = FAISS.load_local('vectorstore/faiss_index', embeddings, allow_dangerous_deserialization=True)
         else:
-            try:
-                vetorstore = criar_vetorstore(embeddings)
-                print("Vetorstore FAISS criado e salvo com sucesso.")
-            except Exception as e:
-                st.error(f"Erro ao criar o vetorstore FAISS: {e}")
-                st.stop()
+            vetorstore = criar_vetorstore(embeddings)
 
-        # Inicialize a memória da conversação
         if "memory" not in st.session_state:
             st.session_state.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-            print("Memória da conversação inicializada.")
 
-        # Configure o ConversationalRetrievalChain
-        try:
-            qa = ConversationalRetrievalChain.from_llm(
-                llm=ChatOpenAI(
-                    openai_api_key=OPENAI_API_KEY,
-                    temperature=0,
-                    model_name="gpt-4o-mini",
-                    max_tokens=1000
-                ),
-                retriever=vetorstore.as_retriever(search_kwargs={"k": 1}),
-                memory=st.session_state.memory,
-                chain_type="stuff",
-                combine_docs_chain_kwargs={
-                    "prompt": prompt_template
-                },
-                verbose=True
-            )
-            print("ConversationalRetrievalChain configurado com sucesso.")
-        except Exception as e:
-            st.error(f"Erro ao configurar ConversationalRetrievalChain: {e}")
-            st.stop()
+        qa = ConversationalRetrievalChain.from_llm(
+            llm=ChatOpenAI(
+                openai_api_key=OPENAI_API_KEY,
+                temperature=0,
+                model_name="gpt-4o-mini",
+                max_tokens=1000
+            ),
+            retriever=vetorstore.as_retriever(search_kwargs={"k": 1}),
+            memory=st.session_state.memory,
+            chain_type="stuff",
+            combine_docs_chain_kwargs={"prompt": prompt_template},
+            verbose=True
+        )
 
-        # Obtenha a resposta do LLM
+        # Usar CrewAI para construir a resposta com o agente SQL
+        crew = configurar_agente_sql(embeddings)
+        result = crew.kickoff(inputs={'question': user_input})
+
+        # Exibir a estrutura completa de result para depuração detalhada
+        print("Estrutura completa do result:", vars(result))
+
+        # Extraia a resposta e verifique sua estrutura
         try:
-            resposta = qa({"question": user_input})
-            print("Resposta obtida do LLM com sucesso.")
+            # Procurar pela resposta em diferentes atributos de result
+            resposta = None
+            if hasattr(result, 'output') and result.output:
+                resposta = result.output
+            elif hasattr(result, 'text') and result.text:  # Verifica se há um campo text
+                resposta = result.text
+            elif hasattr(result, 'data') and result.data:  # Verifica se há um campo data
+                resposta = result.data
+            elif hasattr(result, 'message') and result.message:  # Verifica se há um campo message
+                resposta = result.message
+
+            # Formata a resposta se ela for uma lista ou string
+            if resposta:
+                if isinstance(resposta, list):
+                    resposta = " ".join(str(item) for sublist in resposta for item in sublist)
+                elif isinstance(resposta, str):
+                    resposta = resposta
+                else:
+                    resposta = "Formato inesperado da resposta."
+            else:
+                resposta = "Nenhum resultado encontrado ou erro na consulta."
+
         except Exception as e:
-            st.error(f"Erro ao obter a resposta do LLM: {e}")
-            st.stop()
+            resposta = f"Erro ao processar a resposta: {e}"
+            print("Erro ao acessar output:", e)  # Adiciona a mensagem de erro para depuração
 
         # Adicione a resposta à sessão e exiba
-        st.session_state.messages.append({"role": "assistant", "content": resposta['answer']})
-        st.chat_message("assistant").write(resposta['answer'])
-
-# Função para criar o vetorstore a partir do PostgreSQL
-def criar_vetorstore(embeddings):
-    textos = carregar_dados_postgresql()  # Carrega dados do banco PostgreSQL
-    print(f"Texto extraído: {len(textos)} caracteres")
-    if not textos.strip():
-        raise ValueError("Nenhum texto foi extraído do banco de dados PostgreSQL.")
-    
-    chunks = processar_texto(textos)
-    print(f"Número de chunks criados: {len(chunks)}")
-    if not chunks:
-        raise ValueError("Nenhum chunk foi criado a partir do texto extraído.")
-    
-    vetorstore = FAISS.from_texts(chunks, embedding=embeddings)
-    vetorstore.save_local('vectorstore/faiss_index')
-    print("Vetorstore criado e salvo com sucesso.")
-    return vetorstore
-
-
+        st.session_state.messages.append({"role": "assistant", "content": resposta})
+        st.chat_message("assistant").write(resposta)
 
 if __name__ == "__main__":
     embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
     criar_vetorstore(embeddings)
     main()
-
-    
