@@ -64,11 +64,13 @@ def run_query(query: str):
     """Execute a query no banco de dados e retorne os dados."""
     connection = conectar_postgresql()
     cursor = connection.cursor()
-
-    # Modificação para lidar com case insensitive
+    print(query)
     if "WHERE first_name =" in query:
-        # Ajusta a consulta para tornar case-insensitive na coluna first_name
-        query = query.replace("first_name =", "LOWER(first_name) = LOWER(").replace("';", "');")
+        # e converte o valor do nome para maiúsculas
+        query = query.replace("WHERE first_name =", "WHERE first_name ILIKE")
+    
+    elif "WHERE last_name =" in query:
+        query = query.replace("WHERE last_name =", "WHERE last_name ILIKE")
 
     cursor.execute(query)
     result = cursor.fetchall()
@@ -89,12 +91,16 @@ def configurar_agente_sql(embeddings):
         tools=[run_query],
         allow_delegation=False,
         verbose=True,
-        llm=ChatOpenAI(openai_api_key=OPENAI_API_KEY, temperature=0)
+        llm=ChatOpenAI(openai_api_key=OPENAI_API_KEY, temperature=0, model="gpt-4o-mini")
     )
-    
     sql_developer_task = Task(
-        description="""Construir uma consulta SQL para responder a pergunta: {question} usando a tabela 'actor'. Use o esquema fornecido.""",
-        expected_output="""Retornar dados da tabela 'actor'.""",
+        description="""Construir uma consulta SQL para responder a pergunta: {question} usando a tabela 'actor'. Formate todos os nomes que forem inseridos inteiramente formado de letras maiusculas""",
+        expected_output="""
+        Preciso que o output seja uma resposta formatada para responder a pergunta, de acordo com os dados encontrados pela tool de query no banco.
+        Preciso que quando for formatado a resposta, todos os nomes inseridos sejam formatados com apenas a primeira letra em maiusculo.
+        Caso tenha mais de um sobrenome para um primeiro nome ou o contrário, significa que existem mais de um ator com aquele primeiro nome, informe isto na resposta.
+        Caso tenha datas de último update iguais, você deve mostrar apenas do ator que for mencionado, APENAS SE FOR REQUISITADO.
+        """,
         agent=sql_developer_agent
     )
     
@@ -102,7 +108,7 @@ def configurar_agente_sql(embeddings):
         agents=[sql_developer_agent],
         tasks=[sql_developer_task],
         process=Process.sequential,
-        manager_llm=ChatOpenAI(openai_api_key=OPENAI_API_KEY)
+        verbose=True
     )
     return crew
 
@@ -172,38 +178,9 @@ def main():
 
         # Exibir a estrutura completa de result para depuração detalhada
         print("Estrutura completa do result:", vars(result))
-
-        # Extraia a resposta e verifique sua estrutura
-        try:
-            # Procurar pela resposta em diferentes atributos de result
-            resposta = None
-            if hasattr(result, 'output') and result.output:
-                resposta = result.output
-            elif hasattr(result, 'text') and result.text:  # Verifica se há um campo text
-                resposta = result.text
-            elif hasattr(result, 'data') and result.data:  # Verifica se há um campo data
-                resposta = result.data
-            elif hasattr(result, 'message') and result.message:  # Verifica se há um campo message
-                resposta = result.message
-
-            # Formata a resposta se ela for uma lista ou string
-            if resposta:
-                if isinstance(resposta, list):
-                    resposta = " ".join(str(item) for sublist in resposta for item in sublist)
-                elif isinstance(resposta, str):
-                    resposta = resposta
-                else:
-                    resposta = "Formato inesperado da resposta."
-            else:
-                resposta = "Nenhum resultado encontrado ou erro na consulta."
-
-        except Exception as e:
-            resposta = f"Erro ao processar a resposta: {e}"
-            print("Erro ao acessar output:", e)  # Adiciona a mensagem de erro para depuração
-
-        # Adicione a resposta à sessão e exiba
-        st.session_state.messages.append({"role": "assistant", "content": resposta})
-        st.chat_message("assistant").write(resposta)
+        result = vars(result)
+        st.session_state.messages.append({"role": "assistant", "content": result.get("raw")})
+        st.chat_message("assistant").write(result.get("raw"))
 
 if __name__ == "__main__":
     embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
