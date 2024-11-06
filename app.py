@@ -1,16 +1,19 @@
 import os
 import streamlit as st
 import psycopg2
+import redis
 from utils.text_processing import processar_texto
 from langchain.chains import ConversationalRetrievalChain
 from langchain_community.chat_models import ChatOpenAI
-from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain.memory import ConversationBufferMemory
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
 from crewai import Agent, Task, Crew, Process
 from crewai_tools import tool
+from redis.commands.search.field import VectorField, TextField
+from redis.commands.search.indexDefinition import IndexDefinition, IndexType
+from redis.commands.search.query import Query
 
 load_dotenv()
 
@@ -122,15 +125,49 @@ def carregar_dados_postgresql():
     connection.close()
     return textos
 
-# Função para criar o vetorstore
-def criar_vetorstore(embeddings):
-    textos = carregar_dados_postgresql()
-    chunks = processar_texto(textos)
-    vetorstore = FAISS.from_texts(chunks, embedding=embeddings)
-    vetorstore.save_local('vectorstore/faiss_index')
-    return vetorstore
+# Conexão com o Redis
+def conectar_redis():
+    client =  redis.Redis(host='localhost', port=6379, db=0,)
+    print(f'PING FUNCIONOU AQUI {client.ping()}')
+    return client
 
-# Main com integração do CrewAI e depuração de kickoff()
+# Criar índice de embeddings no Redis
+def criar_indice_redis(redis_client):
+    idx = redis_client.ft(index_name="idx:embeddings")
+    try:
+        idx.info()
+    except Exception as e:
+        print(f"Erro ao verificar índice: {e}")
+        idx.create_index(
+            fields=[
+                VectorField("embedding", "FLAT", {"DIM": 128}),  # Somente tipo e dimensão
+                TextField("content")
+            ],
+            definition=IndexDefinition(prefix=["emb:"], index_type=IndexType.HASH)
+        )
+
+
+
+# Armazenar embeddings no Redis
+def armazenar_embeddings_redis(redis_client, embeddings, textos):
+    for idx, chunk in enumerate(textos):
+        embedding_vector = embeddings.embed_text(chunk)
+        redis_client.hset(
+            f"emb:{idx}",
+            mapping={
+                "embedding": embedding_vector,  # Vetor de embedding
+                "content": chunk  # Conteúdo de texto associado
+            }
+        )
+
+# Função para buscar embeddings no Redis
+def buscar_embeddings_redis(redis_client, query_vector):
+    search_query = Query(f'*=>[KNN 1 @embedding $vec]').sort_by("content").dialect(2)
+    params = {"vec": query_vector}
+    results = redis_client.ft("idx:embeddings").search(search_query, query_params=params)
+    return results
+
+# Main com integração do CrewAI e Redis
 def main():
     st.set_page_config(page_title="💬 Chat-oppem", page_icon="🤖")
     st.title("💬 Chat-oppem")
@@ -139,8 +176,15 @@ def main():
     if "messages" not in st.session_state:
         st.session_state["messages"] = [{"role": "assistant", "content": "Olá! Como posso ajudar você hoje?"}]
     
-    for msg in st.session_state.messages:
-        st.chat_message(msg["role"]).write(msg["content"])
+    redis_client = conectar_redis()
+    criar_indice_redis(redis_client)
+
+    # Verificar se embeddings estão carregados no Redis
+    if redis_client.exists("emb:0") == 0:
+        textos = carregar_dados_postgresql()
+        embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+        chunks = processar_texto(textos)
+        armazenar_embeddings_redis(redis_client, embeddings, chunks)
 
     user_input = st.chat_input("Você:")
 
@@ -149,34 +193,31 @@ def main():
         st.chat_message("user").write(user_input)
 
         embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+        query_embedding = embeddings.embed_text(user_input)
 
-        if os.path.exists('vectorstore/faiss_index'):
-            vetorstore = FAISS.load_local('vectorstore/faiss_index', embeddings, allow_dangerous_deserialization=True)
-        else:
-            vetorstore = criar_vetorstore(embeddings)
+        # Busca no Redis
+        results = buscar_embeddings_redis(redis_client, query_embedding)
 
-        if "memory" not in st.session_state:
-            st.session_state.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-
-        qa = ConversationalRetrievalChain.from_llm(
-            llm=ChatOpenAI(
-                openai_api_key=OPENAI_API_KEY,
-                temperature=0,
-                model_name="gpt-4o-mini",
-                max_tokens=1000
-            ),
-            retriever=vetorstore.as_retriever(search_kwargs={"k": 1}),
-            memory=st.session_state.memory,
-            chain_type="stuff",
-            combine_docs_chain_kwargs={"prompt": prompt_template},
-            verbose=True
-        )
+        # Obter e exibir o resultado do Redis
+        if results.docs:
+            resposta = results.docs[0].content
+            st.session_state.messages.append({"role": "assistant", "content": resposta})
+            st.chat_message("assistant").write(resposta)
 
         # Usar CrewAI para construir a resposta com o agente SQL
         crew = configurar_agente_sql(embeddings)
-        result = crew.kickoff(inputs={'question': user_input})
+        
+        # Configuração do ChatOpenAI conforme o Código 2
+        llm = ChatOpenAI(
+            openai_api_key=OPENAI_API_KEY,
+            temperature=0,
+            model_name="gpt-4o-mini",
+            max_tokens=1000
+        )
+        
+        # Utilizando o llm no kickoff do CrewAI
+        result = crew.kickoff(inputs={'question': user_input, 'llm': llm})
 
-        # Exibir a estrutura completa de result para depuração detalhada
         print("Estrutura completa do result:", vars(result))
         result = vars(result)
         st.session_state.messages.append({"role": "assistant", "content": result.get("raw")})
@@ -184,5 +225,4 @@ def main():
 
 if __name__ == "__main__":
     embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-    criar_vetorstore(embeddings)
     main()
