@@ -2,10 +2,12 @@ import os
 import streamlit as st
 import psycopg2
 import redis
+import json
+import numpy as np
 from utils.text_processing import processar_texto
 from langchain.chains import ConversationalRetrievalChain
 from langchain_community.chat_models import ChatOpenAI
-from langchain_community.embeddings import OpenAIEmbeddings
+from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.memory import ConversationBufferMemory
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
@@ -131,40 +133,68 @@ def conectar_redis():
     print(f'PING FUNCIONOU AQUI {client.ping()}')
     return client
 
-# Criar índice de embeddings no Redis
 def criar_indice_redis(redis_client):
+    # Tenta remover o índice existente antes de criar um novo
+    try:
+        redis_client.ft("idx:embeddings").dropindex(delete_documents=True)
+        print("Índice existente removido com sucesso.")
+    except Exception as e:
+        print("Nenhum índice existente encontrado ou erro ao remover o índice:", e)
+
+    # Criação do novo índice com a dimensão correta
     idx = redis_client.ft(index_name="idx:embeddings")
     try:
-        idx.info()
-    except Exception as e:
-        print(f"Erro ao verificar índice: {e}")
         idx.create_index(
             fields=[
-                VectorField("embedding", "FLAT", {"DIM": 128}),  # Somente tipo e dimensão
-                TextField("content")
+                VectorField(
+                    name="embedding",
+                    algorithm="FLAT",
+                    attributes={
+                        "TYPE": "FLOAT32",
+                        "DIM": 6144,  # Altere para 6144
+                        "DISTANCE_METRIC": "COSINE"
+                    }
+                ),
+                TextField('content')
             ],
             definition=IndexDefinition(prefix=["emb:"], index_type=IndexType.HASH)
         )
-
+        print("Novo índice criado com sucesso.")
+    except Exception as e:
+        print("Erro ao criar o índice:", e)
 
 
 # Armazenar embeddings no Redis
 def armazenar_embeddings_redis(redis_client, embeddings, textos):
     for idx, chunk in enumerate(textos):
-        embedding_vector = embeddings.embed_text(chunk)
+        embedding_vector = embeddings.embed_query(chunk)
+        # Converte o vetor para bytes
+        embedding_vector_bytes = np.array(embedding_vector, dtype=np.float32).tobytes()
         redis_client.hset(
             f"emb:{idx}",
             mapping={
-                "embedding": embedding_vector,  # Vetor de embedding
+                "embedding": embedding_vector_bytes,  # Vetor convertido para bytes
                 "content": chunk  # Conteúdo de texto associado
             }
         )
 
+
 # Função para buscar embeddings no Redis
 def buscar_embeddings_redis(redis_client, query_vector):
     search_query = Query(f'*=>[KNN 1 @embedding $vec]').sort_by("content").dialect(2)
-    params = {"vec": query_vector}
+
+    # Converte o vetor de query para bytes
+    query_vector_bytes = np.array(query_vector, dtype=np.float32).tobytes()
+    params = {"vec": query_vector_bytes}
+
     results = redis_client.ft("idx:embeddings").search(search_query, query_params=params)
+
+    # Se houver resultados, converta o embedding de volta para lista
+    if results.docs:
+        embedding_vector_bytes = redis_client.hget(results.docs[0].id, "embedding")
+        embedding_vector = np.frombuffer(embedding_vector_bytes, dtype=np.float32).tolist()
+        results.docs[0].embedding = embedding_vector  # Adiciona o vetor convertido ao resultado
+
     return results
 
 # Main com integração do CrewAI e Redis
@@ -193,7 +223,8 @@ def main():
         st.chat_message("user").write(user_input)
 
         embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-        query_embedding = embeddings.embed_text(user_input)
+        query_embedding = embeddings.embed_query(user_input)
+
 
         # Busca no Redis
         results = buscar_embeddings_redis(redis_client, query_embedding)
