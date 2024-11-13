@@ -114,6 +114,7 @@ def configurar_agente_sql(embeddings):
         tasks=[sql_developer_task],
         process=Process.sequential,
         verbose=True
+        llm=llm
     )
     return crew
 
@@ -247,7 +248,8 @@ def main():
         )
         
         # Utilizando o llm no kickoff do CrewAI
-        result = crew.kickoff(inputs={'question': user_input, 'llm': llm})
+        result = crew.kickoff(inputs={'question': user_input})
+
 
         print("Estrutura completa do result:", vars(result))
         result = vars(result)
