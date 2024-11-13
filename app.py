@@ -84,10 +84,18 @@ def run_query(query: str):
     connection.close()
     return result
 
-# Configuração do agente SQL com CrewAI
 def configurar_agente_sql(embeddings):
-    actor_schema_info = get_actor_schema()  # Obtém as colunas da tabela "actor"
+    actor_schema_info = get_actor_schema()
 
+    # Instância do ChatOpenAI
+    llm = ChatOpenAI(
+        openai_api_key=OPENAI_API_KEY,
+        temperature=0,
+        model_name="gpt-4o-mini",
+        max_tokens=1000
+    )
+
+    # Criação do agente SQL
     sql_developer_agent = Agent(
         role='Senior SQL developer',
         goal="Return data from the 'actor' table by running the Execute query DB tool.",
@@ -96,27 +104,26 @@ def configurar_agente_sql(embeddings):
         tools=[run_query],
         allow_delegation=False,
         verbose=True,
-        llm=ChatOpenAI(openai_api_key=OPENAI_API_KEY, temperature=0, model="gpt-4o-mini")
+        llm=llm  # Define o LLM diretamente aqui
     )
+
+    # Definição da tarefa
     sql_developer_task = Task(
-        description="""Construir uma consulta SQL para responder a pergunta: {question} usando a tabela 'actor'. Formate todos os nomes que forem inseridos inteiramente formado de letras maiusculas""",
-        expected_output="""
-        Preciso que o output seja uma resposta formatada para responder a pergunta, de acordo com os dados encontrados pela tool de query no banco.
-        Preciso que quando for formatado a resposta, todos os nomes inseridos sejam formatados com apenas a primeira letra em maiusculo.
-        Caso tenha mais de um sobrenome para um primeiro nome ou o contrário, significa que existem mais de um ator com aquele primeiro nome, informe isto na resposta.
-        Caso tenha datas de último update iguais, você deve mostrar apenas do ator que for mencionado, APENAS SE FOR REQUISITADO.
-        """,
+        description="""Construir uma consulta SQL para responder a pergunta: {question} usando a tabela 'actor'.""",
+        expected_output="Resposta formatada para responder a pergunta de acordo com os dados encontrados pela query.",
         agent=sql_developer_agent
     )
-    
+
+    # Configuração do Crew
     crew = Crew(
         agents=[sql_developer_agent],
         tasks=[sql_developer_task],
         process=Process.sequential,
         verbose=True
-        llm=llm
     )
+
     return crew
+
 
 # Carregar dados do PostgreSQL
 def carregar_dados_postgresql():
@@ -239,17 +246,9 @@ def main():
         # Usar CrewAI para construir a resposta com o agente SQL
         crew = configurar_agente_sql(embeddings)
         
-        # Configuração do ChatOpenAI conforme o Código 2
-        llm = ChatOpenAI(
-            openai_api_key=OPENAI_API_KEY,
-            temperature=0,
-            model_name="gpt-4o-mini",
-            max_tokens=1000
-        )
         
         # Utilizando o llm no kickoff do CrewAI
         result = crew.kickoff(inputs={'question': user_input})
-
 
         print("Estrutura completa do result:", vars(result))
         result = vars(result)
