@@ -24,8 +24,7 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 prompt_template = PromptTemplate(
     input_variables=["context", "question"],
     template="""
-Você é um assistente virtual especializado em ajudar usuários com dúvidas relacionadas ao banco de dados vinculado. Sempre que possível, baseie suas respostas nas informações presentes no banco de dados Postgres vinculado para garantir que as respostas sejam precisas e atualizadas.
-Lembre-se seja sempre direto e objetivo em suas respostas, fornecendo instruções claras e concisas para ajudar o usuário a resolver seu problema. Você DEVE responder apenas perguntas relacionadas ao banco de dados Postgres vinculado! Você deve responder as perguntas relacionadas ao banco, e não solicitar uma query!!
+Você é um assistente virtual especializado em ajudar usuários com dúvidas relacionadas ao banco de dados PostgreSQL vinculado. Para perguntas genéricas ou saudações como "Olá", "Oi", "Tudo bem", responda apenas com "Olá, como posso ajudar?". Você só deve utilizar informações do banco de dados para responder perguntas diretamente relacionadas ao conteúdo do banco.
 
 Contexto:
 {context}
@@ -36,6 +35,7 @@ Pergunta:
 Resposta:
 """
 )
+
 
 # Conexão com o PostgreSQL
 def conectar_postgresql():
@@ -237,23 +237,19 @@ def main():
         # Busca no Redis
         results = buscar_embeddings_redis(redis_client, query_embedding)
 
-        # Obter e exibir o resultado do Redis
+        # Verificar e exibir o resultado do Redis
         if results.docs:
             resposta = results.docs[0].content
             st.session_state.messages.append({"role": "assistant", "content": resposta})
             st.chat_message("assistant").write(resposta)
-
-        # Usar CrewAI para construir a resposta com o agente SQL
-        crew = configurar_agente_sql(embeddings)
-        
-        
-        # Utilizando o llm no kickoff do CrewAI
-        result = crew.kickoff(inputs={'question': user_input})
-
-        print("Estrutura completa do result:", vars(result))
-        result = vars(result)
-        st.session_state.messages.append({"role": "assistant", "content": result.get("raw")})
-        st.chat_message("assistant").write(result.get("raw"))
+        else:
+            # Somente acionar o CrewAI se não houver resultado no Redis
+            crew = configurar_agente_sql(embeddings)
+            result = crew.kickoff(inputs={'question': user_input})
+            print("Estrutura completa do result:", vars(result))
+            result = vars(result)
+            st.session_state.messages.append({"role": "assistant", "content": result.get("raw")})
+            st.chat_message("assistant").write(result.get("raw"))
 
 if __name__ == "__main__":
     embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
