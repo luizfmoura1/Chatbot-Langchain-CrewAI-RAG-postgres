@@ -82,8 +82,8 @@ def configurar_agente_sql():
     # Criação do agente SQL
     sql_developer_agent = Agent(
         role='Postgres analyst senior',
-        goal="Sua função é fazer query no banco de dados referente a atores, quando necessário, de acordo com o pedido do usuário.",
-        backstory=f"""Você está conectado ao banco de dados que contém a tabela 'actor' com as seguintes colunas: {actor_schema_info},
+        goal="Sua função é fazer query no banco de dados referente a dados encontrados na table actor, quando necessário, de acordo com o pedido do usuário.",
+        backstory=f"""Você está conectado ao banco de dados que contém a table 'actor' com as seguintes colunas: {actor_schema_info},
         Para perguntas referentes ao banco de dados utilize a sua tool para fazer a busca no mesmo,
         Caso a pergunta seja algo fora do tema principal, retorne uma resposta baseado em seu conhecimento geral.""",
         tools=[run_query],
@@ -94,9 +94,9 @@ def configurar_agente_sql():
 
     # Definição da tarefa
     sql_developer_task = Task(
-        description="""Construir uma consulta no banco para responder a pergunta: {question}, caso a pergunta seja referente ao banco de dados de actors.
+        description="""Construir uma consulta no banco para responder a pergunta: {question}, caso a pergunta seja referente a table actor do banco de dados.
         Caso a pergunta seja fora do tema do banco, apenas responda o usuário com seu conhecimento geral""",
-        expected_output="Caso a pergunta seja referente ao banco, preciso de uma resposta formulada e baseada nos dados obtidos pela query, preciso apenas do nome do ator. Caso a pergunta não seja referente ao banco de dados, responda de acordo com seus conhecimentos mas lembre de no final da resposta trazer o tema principal do banco e sua função para não deixar que o assunto desvie",
+        expected_output="Caso a pergunta seja referente ao banco, preciso de uma resposta formulada e baseada nos dados obtidos pela query, preciso apenas do nome do ator. Caso ocorra uma pergunta que não tenha relação com a table actor do banco de dados vinculado a você, responda com seus conhecimentos gerais e ao fim traga diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final.",
         agent=sql_developer_agent
     )
 
@@ -161,21 +161,29 @@ def criar_indice_redis(redis_client):
 # Armazenar embeddings no Redis
 def armazenar_embeddings_redis(redis_client, embeddings, textos):
     for idx, chunk in enumerate(textos):
+        # Verificar se o embedding já existe no Redis
+        if redis_client.exists(f"emb:{idx}"):
+            print(f"Embedding emb:{idx} já existe, pulando...")
+            continue
+
+        # Gerar o embedding para o novo chunk de texto
         embedding_vector = embeddings.embed_query(chunk)
-        # Converte o vetor para bytes
         embedding_vector_bytes = np.array(embedding_vector, dtype=np.float32).tobytes()
+
+        # Armazenar o novo embedding no Redis
         redis_client.hset(
             f"emb:{idx}",
             mapping={
-                "embedding": embedding_vector_bytes,  # Vetor convertido para bytes
-                "content": chunk  # Conteúdo de texto associado
+                "embedding": embedding_vector_bytes,
+                "content": chunk
             }
         )
+        print(f"Novo embedding emb:{idx} armazenado com sucesso.")
 
 
 # Função para buscar embeddings no Redis
-def buscar_embeddings_redis(redis_client, query_vector):
-    search_query = Query(f'*=>[KNN 1 @embedding $vec]').sort_by("content").dialect(2)
+def buscar_embeddings_redis(redis_client, query_vector, k=3):
+    search_query = Query(f'*=>[KNN {k} @embedding $vec]').sort_by("content").dialect(2)
 
     # Converte o vetor de query para bytes
     query_vector_bytes = np.array(query_vector, dtype=np.float32).tobytes()
