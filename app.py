@@ -21,22 +21,6 @@ load_dotenv()
 
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
-prompt_template = PromptTemplate(
-    input_variables=["context", "question"],
-    template="""
-Você é um assistente virtual especializado em ajudar usuários com dúvidas relacionadas ao banco de dados PostgreSQL vinculado. Para perguntas genéricas ou saudações como "Olá", "Oi", "Tudo bem", responda apenas com "Olá, como posso ajudar?". Você só deve utilizar informações do banco de dados para responder perguntas diretamente relacionadas ao conteúdo do banco.
-
-Contexto:
-{context}
-
-Pergunta:
-{question}
-
-Resposta:
-"""
-)
-
-
 # Conexão com o PostgreSQL
 def conectar_postgresql():
     try:
@@ -84,7 +68,7 @@ def run_query(query: str):
     connection.close()
     return result
 
-def configurar_agente_sql(embeddings):
+def configurar_agente_sql():
     actor_schema_info = get_actor_schema()
 
     # Instância do ChatOpenAI
@@ -97,20 +81,22 @@ def configurar_agente_sql(embeddings):
 
     # Criação do agente SQL
     sql_developer_agent = Agent(
-        role='Senior SQL developer',
-        goal="Return data from the 'actor' table by running the Execute query DB tool.",
-        backstory=f"""Você está conectado ao banco de dados que contém a tabela 'actor' com as seguintes colunas: {actor_schema_info}.
-                      Use o Execute query DB tool para realizar consultas específicas nesta tabela e retornar os resultados.""",
+        role='Postgres analyst senior',
+        goal="Sua função é fazer query no banco de dados referente a atores, quando necessário, de acordo com o pedido do usuário.",
+        backstory=f"""Você está conectado ao banco de dados que contém a tabela 'actor' com as seguintes colunas: {actor_schema_info},
+        Para perguntas referentes ao banco de dados utilize a sua tool para fazer a busca no mesmo,
+        Caso a pergunta seja algo fora do tema principal, retorne uma resposta baseado em seu conhecimento geral.""",
         tools=[run_query],
         allow_delegation=False,
         verbose=True,
-        llm=llm  # Define o LLM diretamente aqui
-    )
+        llm=llm
+        )
 
     # Definição da tarefa
     sql_developer_task = Task(
-        description="""Construir uma consulta SQL para responder a pergunta: {question} usando a tabela 'actor'.""",
-        expected_output="Resposta formatada para responder a pergunta de acordo com os dados encontrados pela query.",
+        description="""Construir uma consulta no banco para responder a pergunta: {question}, caso a pergunta seja referente ao banco de dados de actors.
+        Caso a pergunta seja fora do tema do banco, apenas responda o usuário com seu conhecimento geral""",
+        expected_output="Caso a pergunta seja referente ao banco, preciso de uma resposta formulada e baseada nos dados obtidos pela query, preciso apenas do nome do ator. Caso a pergunta não seja referente ao banco de dados, responda de acordo com seus conhecimentos mas lembre de no final da resposta trazer o tema principal do banco e sua função para não deixar que o assunto desvie",
         agent=sql_developer_agent
     )
 
@@ -208,8 +194,8 @@ def buscar_embeddings_redis(redis_client, query_vector):
 # Main com integração do CrewAI e Redis
 def main():
     st.set_page_config(page_title="💬 Chat-oppem", page_icon="🤖")
-    st.title("💬 Chat-oppem")
-    st.caption("🚀 Pergunte para nossa IA especialista em Oppem")
+    st.title("OppemBOT 🤖")
+    st.caption("🚀 Pergunte para nossa IA especialista da Oppem")
 
     if "messages" not in st.session_state:
         st.session_state["messages"] = [{"role": "assistant", "content": "Olá! Como posso ajudar você hoje?"}]
@@ -217,10 +203,10 @@ def main():
     redis_client = conectar_redis()
     criar_indice_redis(redis_client)
 
+    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
     # Verificar se embeddings estão carregados no Redis
     if redis_client.exists("emb:0") == 0:
         textos = carregar_dados_postgresql()
-        embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
         chunks = processar_texto(textos)
         armazenar_embeddings_redis(redis_client, embeddings, chunks)
 
@@ -230,9 +216,7 @@ def main():
         st.session_state.messages.append({"role": "user", "content": user_input})
         st.chat_message("user").write(user_input)
 
-        embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
         query_embedding = embeddings.embed_query(user_input)
-
 
         # Busca no Redis
         results = buscar_embeddings_redis(redis_client, query_embedding)
@@ -244,7 +228,7 @@ def main():
             st.chat_message("assistant").write(resposta)
         else:
             # Somente acionar o CrewAI se não houver resultado no Redis
-            crew = configurar_agente_sql(embeddings)
+            crew = configurar_agente_sql()
             result = crew.kickoff(inputs={'question': user_input})
             print("Estrutura completa do result:", vars(result))
             result = vars(result)
@@ -252,5 +236,4 @@ def main():
             st.chat_message("assistant").write(result.get("raw"))
 
 if __name__ == "__main__":
-    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
     main()
