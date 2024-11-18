@@ -137,41 +137,59 @@ def conectar_redis():
     print(f'PING FUNCIONOU AQUI {client.ping()}')
     return client
 
-def criar_indice_redis(redis_client):
-    idx = redis_client.ft(index_name="idx:embeddings")
-
-    # Verificar se o índice já existe
+def verificar_e_deletar_indice(redis_client, index_name="idx:embeddings", expected_dim=24576):
     try:
+        idx = redis_client.ft(index_name)
         info = idx.info()
-        # Verificar a dimensão do índice existente
-        embedding_dim = info['attributes'][0]['DIM']
-        if embedding_dim != 1536:
-            print(f"Índice existente encontrado com dimensão {embedding_dim}. Apagando o índice incorreto...")
-            idx.dropindex(delete_documents=False)
-            raise Exception("Índice apagado devido a dimensão incorreta.")
-        print("Índice existente encontrado com a dimensão correta.")
-    except Exception as e:
-        print("Criando um novo índice...")
 
-        try:
-            # Criação do novo índice com a dimensão correta
-            idx.create_index(
-                fields=[
-                    VectorField(
-                        name="embedding",
-                        algorithm="FLAT",
-                        attributes={
-                            "TYPE": "FLOAT32",
-                            "DIM": 1536,  # Dimensão correta para text-embedding-ada-002
-                            "DISTANCE_METRIC": "COSINE"
-                        }
-                    ),
-                    TextField('content')
-                ],
-                definition=IndexDefinition(prefix=["emb:"], index_type=IndexType.HASH)
-            )
-            print("Novo índice criado com sucesso com dimensão 1536.")
-        except Exception as e:
+        # Acesso à dimensão do índice (corrigido para a estrutura mais recente do Redis-py)
+        attributes = info.get('attributes', [])
+        for attr in attributes:
+            if attr['identifier'] == 'embedding':
+                embedding_dim = attr['DIM']
+                if embedding_dim != expected_dim:
+                    print(f"Dimensão incorreta encontrada ({embedding_dim}). Apagando o índice...")
+                    idx.dropindex(delete_documents=False)
+                    return True  # Índice foi deletado
+                print("Índice encontrado com a dimensão correta.")
+                return False  # Índice não foi deletado
+
+        print("Não foi possível encontrar o campo 'embedding' nas informações do índice.")
+        return True  # Deletar se o campo não for encontrado
+    except Exception as e:
+        print(f"Erro ao verificar o índice: {e}. Provavelmente o índice não existe.")
+        return True  # Índice não existe ou ocorreu erro
+
+
+
+def criar_indice_redis(redis_client):
+    index_name = "idx:embeddings"
+    idx = redis_client.ft(index_name)
+
+    try:
+        print("Criando um novo índice com dimensão 24576...")
+        idx.create_index(
+            fields=[
+                VectorField(
+                    name="embedding",
+                    algorithm="FLAT",
+                    attributes={
+                        "TYPE": "FLOAT32",
+                        "DIM": 24576,
+                        "DISTANCE_METRIC": "COSINE"
+                    }
+                ),
+                TextField('content')
+            ],
+            definition=IndexDefinition(prefix=["emb:"], index_type=IndexType.HASH)
+        )
+        print("Novo índice criado com sucesso com dimensão 24576.")
+    except Exception as e:
+        if "Index already exists" in str(e):
+            print("O índice já existe. Tentando deletá-lo e recriá-lo...")
+            idx.dropindex(delete_documents=False)
+            criar_indice_redis(redis_client)
+        else:
             print("Erro ao criar o índice:", e)
 
 
@@ -180,20 +198,17 @@ def criar_indice_redis(redis_client):
 # Armazenar embeddings no Redis
 def armazenar_embeddings_redis(redis_client, embeddings, textos):
     for idx, chunk in enumerate(textos):
-        # Verificar se o embedding já existe no Redis
         if redis_client.exists(f"emb:{idx}"):
             print(f"Embedding emb:{idx} já existe, pulando...")
             continue
 
-        # Gerar o embedding para o novo chunk de texto
         embedding_vector = embeddings.embed_query(chunk)
-        if len(embedding_vector) != 1536:
-            print(f"Erro: Dimensão do embedding incorreta ({len(embedding_vector)}), esperado 1536.")
+        if len(embedding_vector) != 24576:
+            print(f"Erro: Dimensão do embedding incorreta ({len(embedding_vector)}), esperado 24576.")
             continue
 
         embedding_vector_bytes = np.array(embedding_vector, dtype=np.float32).tobytes()
 
-        # Armazenar o novo embedding no Redis
         redis_client.hset(
             f"emb:{idx}",
             mapping={
@@ -205,26 +220,22 @@ def armazenar_embeddings_redis(redis_client, embeddings, textos):
 
 
 
+
 def buscar_embeddings_redis(redis_client, embeddings, user_input, k=3):
     try:
-        # Utilize o histórico de mensagens para melhorar a consulta
         historico = " ".join([msg["content"] for msg in st.session_state["messages"] if msg["role"] == "user"])
         query_vector = embeddings.embed_query(user_input)
 
-        # Verifique a dimensão do vetor de consulta
-        if len(query_vector) != 1536:
-            print(f"Erro: Dimensão do vetor de consulta incorreta ({len(query_vector)}), esperado 1536.")
+        if len(query_vector) != 24576:
+            print(f"Erro: Dimensão do vetor de consulta incorreta ({len(query_vector)}), esperado 24576.")
             return None
 
-        # Cria a consulta KNN para o Redis
         query_vector_bytes = np.array(query_vector, dtype=np.float32).tobytes()
         search_query = Query(f'*=>[KNN {k} @embedding $vec]').sort_by("content").dialect(2)
         params = {"vec": query_vector_bytes}
 
-        # Executa a busca no Redis
         results = redis_client.ft("idx:embeddings").search(search_query, query_params=params)
 
-        # Verifica se a busca retornou resultados
         if results is None or not hasattr(results, "docs"):
             print("Nenhum resultado encontrado na busca.")
             return None
@@ -240,7 +251,6 @@ def buscar_embeddings_redis(redis_client, embeddings, user_input, k=3):
 
 
 
-# Main com integração do CrewAI e Redis
 def main():
     st.set_page_config(page_title="💬 Chat-oppem", page_icon="🤖")
     st.title("OppemBOT 🤖")
@@ -248,12 +258,18 @@ def main():
 
     if "messages" not in st.session_state:
         st.session_state["messages"] = [{"role": "assistant", "content": "Olá! Como posso ajudar você hoje?"}]
-    
+
     redis_client = conectar_redis()
-    criar_indice_redis(redis_client)
+
+    # Verificar e deletar o índice se a dimensão estiver incorreta
+    indice_deletado = verificar_e_deletar_indice(redis_client)
+
+    # Criar o índice apenas se ele foi deletado ou não existir
+    if indice_deletado:
+        criar_indice_redis(redis_client)
 
     embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY, model="text-embedding-ada-002")
-    # Verificar se embeddings estão carregados no Redis
+
     if redis_client.exists("emb:0") == 0:
         textos = carregar_dados_postgresql()
         chunks = processar_texto(textos)
@@ -265,11 +281,7 @@ def main():
         st.session_state.messages.append({"role": "user", "content": user_input})
         st.chat_message("user").write(user_input)
 
-        query_embedding = embeddings.embed_query(user_input)
-
-        # Busca no Redis com histórico
         results = buscar_embeddings_redis(redis_client, embeddings, user_input)
-
 
         if results and results.docs:
             resposta = results.docs[0].content
@@ -282,7 +294,6 @@ def main():
             result = vars(result)
             st.session_state.messages.append({"role": "assistant", "content": result.get("raw")})
             st.chat_message("assistant").write(result.get("raw"))
-
 
 
 if __name__ == "__main__":
