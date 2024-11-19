@@ -255,9 +255,18 @@ def main():
     st.title("OppemBOT 🤖")
     st.caption("🚀 Pergunte para nossa IA especialista da Oppem")
 
+    # Inicializar mensagens na sessão, se ainda não estiverem configuradas
     if "messages" not in st.session_state:
         st.session_state["messages"] = [{"role": "assistant", "content": "Olá! Como posso ajudar você hoje?"}]
-    
+
+
+    # Exibir todas as mensagens do histórico na conversa
+    for msg in st.session_state["messages"]:
+        if msg["role"] == "user":
+            st.chat_message("user").write(msg["content"])
+        elif msg["role"] == "assistant":
+            st.chat_message("assistant").write(msg["content"])
+
     redis_client = conectar_redis()
     criar_indice_redis(redis_client)
 
@@ -272,7 +281,7 @@ def main():
     user_input = st.chat_input("Você:")
 
     if user_input:
-        st.session_state.messages.append({"role": "user", "content": user_input})
+        st.session_state["messages"].append({"role": "user", "content": user_input})
         st.chat_message("user").write(user_input)
 
         # Busca no Redis com histórico
@@ -286,7 +295,8 @@ def main():
             st.session_state["messages"].append({"role": "assistant", "content": resposta})
             st.chat_message("assistant").write(resposta)
         else:
-            st.session_state.messages.append({"role": "assistant", "content": "Nenhum resultado encontrado no Redis. Tentando buscar no banco de dados..."})
+            # Mensagem de depuração apenas no console, não no chat
+            print("Nenhum resultado encontrado no Redis. Tentando buscar no banco de dados...")
             
             try:
                 # Tentando buscar no banco de dados usando o agente
@@ -303,11 +313,10 @@ def main():
                 st.session_state.messages.append({"role": "assistant", "content": resposta})
                 st.chat_message("assistant").write(resposta)
             else:
-                st.session_state.messages.append({"role": "assistant", "content": "Ocorreu um erro ao processar sua solicitação."})
-                st.chat_message("assistant").write("Ocorreu um erro ao processar sua solicitação.")
-
-
-
+                # Mensagem de erro clara somente para o usuário
+                resposta = "Desculpe, não consegui encontrar a resposta no momento."
+                st.session_state["messages"].append({"role": "assistant", "content": resposta})
+                st.chat_message("assistant").write(resposta)
 
 
 
