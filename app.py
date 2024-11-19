@@ -2,14 +2,11 @@ import os
 import streamlit as st
 import psycopg2
 import redis
-import json
 import numpy as np
 from utils.text_processing import processar_texto
-from langchain.chains import ConversationalRetrievalChain
 from langchain_community.chat_models import ChatOpenAI
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.memory import ConversationBufferMemory
-from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
 from crewai import Agent, Task, Crew, Process
 from crewai_tools import tool
@@ -55,11 +52,11 @@ def run_query(query: str):
     cursor = connection.cursor()
     print(query)
     if "WHERE first_name =" in query:
-        # e converte o valor do nome para maiúsculas
         query = query.replace("WHERE first_name =", "WHERE first_name ILIKE")
-    
-    elif "WHERE last_name =" in query:
+
+    if "WHERE last_name =" in query:
         query = query.replace("WHERE last_name =", "WHERE last_name ILIKE")
+
 
     cursor.execute(query)
     result = cursor.fetchall()
@@ -78,36 +75,37 @@ def configurar_agente_sql(chat_history=None):
         max_tokens=1000
     )
 
-    # Inicializar a memória
-    memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+    # Inicializar a memória apenas uma vez na sessão
+    if "memory" not in st.session_state:
+        st.session_state["memory"] = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+    memory = st.session_state["memory"]
 
-    # Atualizar a memória com o histórico de mensagens do Streamlit
-    if chat_history:
-        for msg in chat_history:
+    # Atualizar a memória com o histórico de mensagens
+    if st.session_state["messages"]:
+        for msg in st.session_state["messages"]:
             if msg["role"] == "user":
                 memory.chat_memory.add_user_message(msg["content"])
             elif msg["role"] == "assistant":
                 memory.chat_memory.add_ai_message(msg["content"])
 
-    # Configurar o agente com a memória atualizada
+     # Configurar o agente com a memória atualizada
     sql_developer_agent = Agent(
         role='Postgres analyst senior',
         goal="Sua função é fazer query no banco de dados referente a dados encontrados na table actor, quando necessário, de acordo com o pedido do usuário.",
-        backstory=f"""Você está conectado ao banco de dados que contém a table 'actor' com as seguintes colunas: {actor_schema_info},
-        Para perguntas referentes ao banco de dados utilize a sua tool para fazer a busca no mesmo,
-        Caso a pergunta seja algo fora do tema principal, retorne uma resposta baseado em seu conhecimento geral,
+        backstory=f"""Você está conectado ao banco de dados que contém a table 'actor' com as seguintes colunas: {actor_schema_info}.
+        Para perguntas referentes ao banco de dados utilize a sua tool para fazer a busca no mesmo.
+        Caso a pergunta seja algo fora do tema principal, retorne uma resposta baseado em seu conhecimento geral.
         Você deve se lembrar de perguntas anteriores e utilizá-las como contexto para outras perguntas.""",
         tools=[run_query],
         allow_delegation=False,
         verbose=True,
-        llm=llm,
         memory=memory
     )
 
     sql_developer_task = Task(
-        description="""Construir uma consulta no banco para responder a pergunta: {question}, caso a pergunta seja referente a table actor do banco de dados.
+        description="""Construir uma consulta no banco para responder a pergunta: {question}, considerando o contexto da conversa anterior: {chat_history} caso a pergunta seja referente a table actor do banco de dados.
         Caso a pergunta seja fora do tema do banco, apenas responda o usuário com seu conhecimento geral.""",
-        expected_output="Caso a pergunta seja referente ao banco, preciso de uma resposta formulada e baseada nos dados obtidos pela query, preciso apenas do nome do ator. Caso ocorra uma pergunta que não tenha relação com a table actor do banco de dados vinculado a você, responda com seus conhecimentos gerais e ao fim traga diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final.",
+        expected_output="Caso a pergunta seja referente ao banco, preciso de uma resposta que apresente todos os dados obtidos pela query formulando a resposta a partir deles, preciso apenas do nome do ator. Caso ocorra uma pergunta que não tenha relação com a table actor do banco de dados vinculado a você, responda com seus conhecimentos gerais e ao fim traga diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final.",
         agent=sql_developer_agent
     )
 
@@ -264,6 +262,7 @@ def main():
     criar_indice_redis(redis_client)
 
     embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY, model="text-embedding-ada-002")
+    
     # Verificar se embeddings estão carregados no Redis
     if redis_client.exists("emb:0") == 0:
         textos = carregar_dados_postgresql()
@@ -276,23 +275,39 @@ def main():
         st.session_state.messages.append({"role": "user", "content": user_input})
         st.chat_message("user").write(user_input)
 
-        query_embedding = embeddings.embed_query(user_input)
-
         # Busca no Redis com histórico
         results = buscar_embeddings_redis(redis_client, embeddings, user_input)
 
+        result = None  # Inicializando result como None
 
-        if results and results.docs:
+        # Verifique se resultados existem e se a lista de docs não está vazia
+        if results and hasattr(results, "docs") and len(results.docs) > 0:
             resposta = results.docs[0].content
-            st.session_state.messages.append({"role": "assistant", "content": resposta})
+            st.session_state["messages"].append({"role": "assistant", "content": resposta})
             st.chat_message("assistant").write(resposta)
         else:
             st.session_state.messages.append({"role": "assistant", "content": "Nenhum resultado encontrado no Redis. Tentando buscar no banco de dados..."})
-            crew = configurar_agente_sql(chat_history=st.session_state["messages"])
-            result = crew.kickoff(inputs={'question': user_input, 'chat_history': st.session_state["messages"]})
-            result = vars(result)
-            st.session_state.messages.append({"role": "assistant", "content": result.get("raw")})
-            st.chat_message("assistant").write(result.get("raw"))
+            
+            try:
+                # Tentando buscar no banco de dados usando o agente
+                crew = configurar_agente_sql(chat_history=st.session_state["messages"])
+                result = crew.kickoff(inputs={'question': user_input, 'chat_history': st.session_state["messages"]})
+                result = vars(result)
+            except Exception as e:
+                print(f"Erro ao executar o agente: {e}")
+                result = None  # Garantir que result seja None caso ocorra erro
+
+            # Verifique se result foi definido e não é None antes de tentar acessar
+            if result is not None:
+                resposta = result.get("raw")
+                st.session_state.messages.append({"role": "assistant", "content": resposta})
+                st.chat_message("assistant").write(resposta)
+            else:
+                st.session_state.messages.append({"role": "assistant", "content": "Ocorreu um erro ao processar sua solicitação."})
+                st.chat_message("assistant").write("Ocorreu um erro ao processar sua solicitação.")
+
+
+
 
 
 
