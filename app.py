@@ -103,7 +103,8 @@ def configurar_agente_sql(chat_history=None):
     )
 
     sql_developer_task = Task(
-        description="""Construir uma consulta no banco para responder a pergunta: {question}, considerando o contexto da conversa anterior: {chat_history} caso a pergunta seja referente a table actor do banco de dados.
+        description="""Construir uma consulta no banco para responder a pergunta: {question}, caso necessário considerando o contexto da conversa anterior: {chat_history} caso a pergunta seja referente a table actor do banco de dados.
+        Você deve realizar a query apenas se for necessário, ssaudações e perguntas não referentes ao tema do banco de dados não são necessárias o uso de querys.
         Caso a pergunta seja fora do tema do banco, apenas responda o usuário com seu conhecimento geral.""",
         expected_output="Caso a pergunta seja referente ao banco, preciso de uma resposta que apresente todos os dados obtidos pela query formulando a resposta a partir deles, preciso apenas do nome do ator. Caso ocorra uma pergunta que não tenha relação com a table actor do banco de dados vinculado a você, responda com seus conhecimentos gerais e ao fim traga diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final.",
         agent=sql_developer_agent
