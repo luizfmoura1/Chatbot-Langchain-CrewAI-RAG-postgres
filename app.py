@@ -23,10 +23,10 @@ def conectar_postgresql():
     try:
         connection = psycopg2.connect(
             host='localhost',
-            database='postgres',
-            user='postgres',
-            password='123456',
-            port=5432
+            database='gerdau',
+            user='gerdau',
+            password='gerdau',
+            port=6432
         )
         print("Conexão com o PostgreSQL estabelecida com sucesso.")
         return connection
@@ -35,14 +35,29 @@ def conectar_postgresql():
         st.stop()
 
 # Função para obter o esquema da tabela "actor"
-def get_actor_schema():
+def get_daily_report_schema():
     connection = conectar_postgresql()
     cursor = connection.cursor()
-    cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'actor'")
+    cursor.execute("""
+        SELECT EXISTS (
+            SELECT 1 FROM information_schema.tables
+            WHERE table_name = 'daily_report' AND table_schema = 'tenant_aperam'
+        )
+    """)
+    exists = cursor.fetchone()[0]
+    if not exists:
+        raise Exception("Tabela 'daily_report' não encontrada no esquema 'tenant_aperam'.")
+    
+    cursor.execute("""
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'daily_report' AND table_schema = 'tenant_aperam'
+    """)
     columns = cursor.fetchall()
     cursor.close()
     connection.close()
     return ", ".join([column[0] for column in columns])
+
 
 # Função de execução de consulta para o agente SQL com depuração
 @tool("Execute query DB tool")
@@ -51,12 +66,6 @@ def run_query(query: str):
     connection = conectar_postgresql()
     cursor = connection.cursor()
     print(query)
-    if "WHERE first_name =" in query:
-        query = query.replace("WHERE first_name =", "WHERE first_name ILIKE")
-
-    if "WHERE last_name =" in query:
-        query = query.replace("WHERE last_name =", "WHERE last_name ILIKE")
-
 
     cursor.execute(query)
     result = cursor.fetchall()
@@ -66,7 +75,7 @@ def run_query(query: str):
     return result
 
 def configurar_agente_sql(chat_history=None):
-    actor_schema_info = get_actor_schema()
+    daily_report_schema_info = get_daily_report_schema()
 
     llm = ChatOpenAI(
         openai_api_key=OPENAI_API_KEY,
@@ -91,9 +100,10 @@ def configurar_agente_sql(chat_history=None):
      # Configurar o agente com a memória atualizada
     sql_developer_agent = Agent(
         role='Postgres analyst senior',
-        goal="Sua função é fazer query no banco de dados referente a dados encontrados na table actor, quando necessário, de acordo com o pedido do usuário.",
-        backstory=f"""Você está conectado ao banco de dados que contém a table 'actor' com as seguintes colunas: {actor_schema_info}.
+        goal="Sua função é fazer query no banco de dados referente a dados encontrados na table daily_report, quando necessário, de acordo com o pedido do usuário.",
+        backstory=f"""Você está conectado ao banco de dados que contém a tabela 'tenant_aperam.daily_report' com as seguintes colunas: {daily_report_schema_info}.
         Para perguntas referentes ao banco de dados utilize a sua tool para fazer a busca no mesmo.
+        O tema principal do banco é sobre Relatórios diários de obra(column id), o dia referente a ele (column executed_at), data de criação (column created_at), id da obra (column project_id), data de aprovação (column approved_at), numéro sequencial (column sequence), quem criou o RDO (column user_username), horário de almoço (column lunch_start_time), termino do almoço (column lunch_end_time), horário do inicio do expediente (column work_start_time), horário do fim do expediente (column work_end_time) e os comentários (column comment).
         Caso a pergunta seja algo fora do tema principal, retorne uma resposta baseado em seu conhecimento geral.
         Você deve se lembrar de perguntas anteriores e utilizá-las como contexto para outras perguntas.""",
         tools=[run_query],
@@ -103,10 +113,10 @@ def configurar_agente_sql(chat_history=None):
     )
 
     sql_developer_task = Task(
-        description="""Construir uma consulta no banco para responder a pergunta: {question}, caso necessário considerando o contexto da conversa anterior: {chat_history} caso a pergunta seja referente a table actor do banco de dados.
-        Você deve realizar a query apenas se for necessário, ssaudações e perguntas não referentes ao tema do banco de dados não são necessárias o uso de querys.
+        description="""Construir uma consulta no banco para responder a pergunta: {question}, caso necessário considerando o contexto da conversa anterior: {chat_history} caso a pergunta seja referente a table daily_report do banco de dados.
+        Você deve realizar a query apenas se for necessário, saudações e perguntas não referentes ao tema do banco de dados não são necessárias o uso de querys.
         Caso a pergunta seja fora do tema do banco, apenas responda o usuário com seu conhecimento geral.""",
-        expected_output="Caso a pergunta seja referente ao banco, preciso de uma resposta que apresente todos os dados obtidos pela query formulando a resposta a partir deles, preciso apenas do nome do ator. Caso ocorra uma pergunta que não tenha relação com a table actor do banco de dados vinculado a você, responda com seus conhecimentos gerais e ao fim traga diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final.",
+        expected_output="Caso a pergunta seja referente ao banco, preciso de uma resposta que apresente todos os dados obtidos pela query formulando a resposta a partir deles. Caso ocorra uma pergunta que não tenha relação com a table daily_report do banco de dados vinculado a você, responda com seus conhecimentos gerais e ao fim traga diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final.",
         agent=sql_developer_agent
     )
 
@@ -125,7 +135,7 @@ def configurar_agente_sql(chat_history=None):
 def carregar_dados_postgresql():
     connection = conectar_postgresql()
     cursor = connection.cursor()
-    cursor.execute("SELECT * FROM public.actor")
+    cursor.execute("SELECT * FROM tenant_aperam.daily_report")
     textos = " ".join([" ".join(map(str, row)) for row in cursor.fetchall()])
     cursor.close()
     connection.close()
