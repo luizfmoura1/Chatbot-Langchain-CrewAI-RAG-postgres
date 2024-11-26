@@ -142,20 +142,15 @@ def criar_indice_redis(redis_client):
 
     try:
         info = idx.info()
-        embedding_dim = info['attributes'][0]['DIM']
-        
-        # Verificar a dimensão do índice
-        if embedding_dim != 24576:
-            print(f"Índice existente com dimensão {embedding_dim}. Apagando o índice incorreto...")
+        embedding_dim = info.get("attributes", [{}])[0].get("DIM", None)
+        if embedding_dim != 1536:
+            print(f"Índice existente com dimensão {embedding_dim}. Apagando e recriando...")
             idx.dropindex(delete_documents=False)
-            raise Exception("Índice apagado devido a dimensão incorreta.")
-        print("Índice existente encontrado com a dimensão correta.")
-    
+            raise Exception("Índice recriado devido a dimensão incorreta.")
+        print("Índice existente encontrado com dimensão correta.")
     except Exception as e:
-        print("Criando um novo índice com dimensão 24576...")
-
+        print(f"Erro ao verificar ou criar índice: {e}. Criando um novo índice...")
         try:
-            # Criar o índice com a dimensão correta (24576)
             idx.create_index(
                 fields=[
                     VectorField(
@@ -163,26 +158,24 @@ def criar_indice_redis(redis_client):
                         algorithm="FLAT",
                         attributes={
                             "TYPE": "VECTOR",
-                            "DIM": 24576,
+                            "DIM": 1536,
                             "DISTANCE_METRIC": "COSINE"
                         }
                     ),
-                    TextField('content')
+                    TextField("content")
                 ],
                 definition=IndexDefinition(prefix=["emb:"], index_type=IndexType.HASH)
             )
-
-            print("Novo índice criado com sucesso com dimensão 24576.")
-        
+            print("Novo índice criado com sucesso.")
         except Exception as e:
-            print("Erro ao criar o índice:", e)
+            print(f"Erro ao criar índice no Redis: {e}")
 
 
 
 
 
 
-# Armazenar embeddings no Redis
+
 def armazenar_embeddings_redis(redis_client, embeddings, textos):
     for idx, chunk in enumerate(textos):
         # Verificar se o embedding já existe no Redis
@@ -190,61 +183,65 @@ def armazenar_embeddings_redis(redis_client, embeddings, textos):
             print(f"Embedding emb:{idx} já existe, pulando...")
             continue
 
+        # Verificar se o chunk é válido
+        if not chunk.strip():
+            print(f"Chunk vazio ou inválido no índice {idx}, ignorando...")
+            continue
+
         # Gerar o embedding para o novo chunk de texto
-        embedding_vector = embeddings.embed_query(chunk)
+        try:
+            embedding_vector = embeddings.embed_query(chunk)
+        except Exception as e:
+            print(f"Erro ao gerar embedding para o chunk {idx}: {e}")
+            continue
+
+        # Validar dimensão do embedding
         if len(embedding_vector) != 1536:
-            print(f"Erro: Dimensão do embedding incorreta ({len(embedding_vector)}), esperado 1536.")
+            print(f"Erro: Dimensão do embedding incorreta ({len(embedding_vector)}) no chunk {idx}, esperado 1536.")
             continue
 
         embedding_vector_bytes = np.array(embedding_vector, dtype=np.float32).tobytes()
 
         # Armazenar o novo embedding no Redis
-        redis_client.hset(
-            f"emb:{idx}",
-            mapping={
-                "embedding": embedding_vector_bytes,
-                "content": chunk
-            }
-        )
-        print(f"Novo embedding emb:{idx} armazenado com sucesso.")
+        try:
+            redis_client.hset(
+                f"emb:{idx}",
+                mapping={
+                    "embedding": embedding_vector_bytes,
+                    "content": chunk
+                }
+            )
+            print(f"Novo embedding emb:{idx} armazenado com sucesso.")
+        except Exception as e:
+            print(f"Erro ao armazenar embedding emb:{idx}: {e}")
+
 
 
 
 def buscar_embeddings_redis(redis_client, embeddings, user_input, k=3):
     try:
-        historico = " ".join([msg["content"] for msg in st.session_state["messages"] if msg["role"] == "user"])
         query_vector = embeddings.embed_query(user_input)
-
-        # Verificar a dimensão do vetor de consulta e expandir para 24576, se necessário
-        if len(query_vector) != 24576:
-            print(f"Dimensão do vetor de consulta incorreta ({len(query_vector)}), expandindo para 24576...")
-            if len(query_vector) == 1536:
-                fator = 24576 // 1536  # Deve ser 64
-                query_vector = np.tile(query_vector, fator)
-        else:
-            print(f"Erro: Dimensão inesperada do vetor de consulta ({len(query_vector)}).")
+        if len(query_vector) != 1536:
+            print(f"Erro: Dimensão do vetor de consulta incorreta ({len(query_vector)}), esperado 1536.")
             return None
-        
-        print(f"Dimensão original do vetor de consulta: {len(query_vector)}")
-        print(f"Dimensão do vetor expandido: {len(query_vector)}")
-
-
 
         query_vector_bytes = np.array(query_vector, dtype=np.float32).tobytes()
-        search_query = Query(f'*=>[KNN {k} @embedding $vec]').sort_by("content").dialect(2)
+        search_query = Query(f"*=>[KNN {k} @embedding $vec]").sort_by("content").dialect(2)
         params = {"vec": query_vector_bytes}
 
         results = redis_client.ft("idx:embeddings").search(search_query, query_params=params)
-
         if results is None or not hasattr(results, "docs"):
             print("Nenhum resultado encontrado na busca.")
             return None
 
+        print(f"{len(results.docs)} resultados encontrados no Redis.")
+        for doc in results.docs:
+            print(f"Resultado: {doc.id} - {doc.content[:100]}...")  # Exibe os primeiros 100 caracteres
         return results
-
     except Exception as e:
-        print("Erro ao buscar embeddings no Redis:", e)
+        print(f"Erro ao buscar embeddings no Redis: {e}")
         return None
+
 
 
 
