@@ -65,17 +65,20 @@ def get_daily_report_schema():
 # Função de execução de consulta para o agente SQL com depuração
 @tool("Execute query DB tool")
 def run_query(query: str):
-    """Execute a query no banco de dados e retorne os dados."""
+    """Execute uma query no banco de dados e retorne os dados formatados."""
     connection = conectar_postgresql()
     cursor = connection.cursor()
-    print(query)
-
+    print(f"Executando query: {query}")  # Debug para verificar a query
     cursor.execute(query)
-    result = cursor.fetchall()
-    print("Resultado da query:", result)  # Exibe o resultado da query para depuração
+    columns = [desc[0] for desc in cursor.description]  # Obter os nomes das colunas
+    rows = cursor.fetchall()
+    result = [dict(zip(columns, row)) for row in rows]  # Converter em lista de dicionários
+    print(f"Resultado da query: {result}")  # Debug para inspecionar o retorno
     cursor.close()
     connection.close()
     return result
+
+
 
 
 @tool("Generate Graph Tool")
@@ -85,7 +88,7 @@ def generate_graph(data, graph_type="bar", x_col=None, y_col=None):
 
     Parâmetros:
         data (list): Dados obtidos pela query, em forma de lista.
-        graph_type (str): Tipo de gráfico ('bar', 'line', 'pie', etc.).
+        graph_type (str): Tipo de gráfico ('bar', 'line', 'pie', etc.). O padrão é 'bar'.
         x_col (str): Nome da coluna para o eixo X (opcional).
         y_col (str): Nome da coluna para o eixo Y (opcional).
 
@@ -96,18 +99,15 @@ def generate_graph(data, graph_type="bar", x_col=None, y_col=None):
         if not data:
             return "Nenhum dado fornecido para gerar o gráfico."
         
-        # Converter os dados em um DataFrame para manipulação mais fácil
         import pandas as pd
         df = pd.DataFrame(data)
-        
-        if x_col and y_col:
-            if x_col not in df.columns or y_col not in df.columns:
-                return f"Colunas especificadas ({x_col}, {y_col}) não estão presentes nos dados."
-            x_data = df[x_col]
-            y_data = df[y_col]
-        else:
-            x_data = df.iloc[:, 0]
-            y_data = df.iloc[:, 1]
+
+        # Usar as primeiras duas colunas como padrão, se x_col ou y_col não forem fornecidos
+        if not x_col or not y_col:
+            x_col, y_col = df.columns[:2]
+
+        x_data = df[x_col]
+        y_data = df[y_col]
 
         # Criar o gráfico
         plt.figure(figsize=(10, 6))
@@ -123,8 +123,8 @@ def generate_graph(data, graph_type="bar", x_col=None, y_col=None):
             return f"Tipo de gráfico '{graph_type}' não suportado."
         
         plt.title(f"Gráfico do tipo {graph_type.capitalize()}")
-        plt.xlabel(x_col if x_col else "X")
-        plt.ylabel(y_col if y_col else "Y")
+        plt.xlabel(x_col)
+        plt.ylabel(y_col)
 
         # Salvar o gráfico como imagem e codificar em base64
         buf = io.BytesIO()
@@ -137,6 +137,8 @@ def generate_graph(data, graph_type="bar", x_col=None, y_col=None):
         return base64_image
     except Exception as e:
         return f"Erro ao gerar o gráfico: {e}"
+
+
 
 
 def configurar_agente_sql(chat_history=None):
@@ -165,7 +167,7 @@ def configurar_agente_sql(chat_history=None):
      # Configurar o agente com a memória atualizada
     sql_developer_agent = Agent(
         role='Postgres analyst senior',
-        goal="Sua função é fazer query no banco de dados referente a dados encontrados na table daily_report, quando necessário, de acordo com o pedido do usuário.",
+        goal="Sua função é fazer query no banco de dados referente a dados encontrados na table daily_report, quando necessário, de acordo com o pedido do usuário. E se for requisitado, você deve gerar umgráfico baseados nos dados obtidos pela query.",
         backstory = f"""
         Você é um analista experiente conectado a um banco de dados que contém a tabela 'tenant_aperam.daily_report', com as seguintes colunas: {daily_report_schema_info}.
         Seu objetivo é responder perguntas relacionadas a essa tabela e fornecer informações claras e precisas. Utilize as ferramentas disponíveis para realizar consultas e gerar gráficos, seguindo estas diretrizes:
@@ -446,17 +448,22 @@ def main():
 
                     # Verificar se o usuário pediu um gráfico
                     if "gráfico" in user_input.lower():
-                        if hasattr(result, 'data'):  # Verificar se 'data' está disponível no resultado
+                        if result and isinstance(result, list):
+                            # Passando os dados corretos para o generate_graph
                             graph_base64 = generate_graph(
-                                data=result.data,
-                                graph_type="bar"  # Ajuste o tipo de gráfico conforme necessário
+                                data=result, 
+                                graph_type="bar",  # Altere para o tipo de gráfico desejado
+                                x_col="Categoria",  # Substitua pelos nomes corretos das colunas
+                                y_col="Quantidade"
                             )
                             if "Erro" not in graph_base64:
                                 response += f"\n\n![Gráfico](data:image/png;base64,{graph_base64})"
                             else:
-                                response += f"\n\n{graph_base64}"
+                                response += f"\n\nErro ao gerar gráfico: {graph_base64}"
                         else:
                             response += "\n\nErro: Dados insuficientes para gerar o gráfico."
+
+
 
                     st.session_state["messages"].append({"role": "assistant", "content": response})
                     st.chat_message("assistant").write(response)
