@@ -78,6 +78,65 @@ def run_query(query: str):
     return result
 
 
+@tool("Generate Graph Tool")
+def generate_graph(data, graph_type="bar", x_col=None, y_col=None):
+    """
+    Gera gráficos com base nos dados fornecidos.
+
+    Parâmetros:
+        data (list): Dados obtidos pela query, em forma de lista.
+        graph_type (str): Tipo de gráfico ('bar', 'line', 'pie', etc.).
+        x_col (str): Nome da coluna para o eixo X (opcional).
+        y_col (str): Nome da coluna para o eixo Y (opcional).
+
+    Retorna:
+        str: Imagem do gráfico codificada em base64.
+    """
+    try:
+        if not data:
+            return "Nenhum dado fornecido para gerar o gráfico."
+        
+        # Converter os dados em um DataFrame para manipulação mais fácil
+        import pandas as pd
+        df = pd.DataFrame(data)
+        
+        if x_col and y_col:
+            if x_col not in df.columns or y_col not in df.columns:
+                return f"Colunas especificadas ({x_col}, {y_col}) não estão presentes nos dados."
+            x_data = df[x_col]
+            y_data = df[y_col]
+        else:
+            x_data = df.iloc[:, 0]
+            y_data = df.iloc[:, 1]
+
+        # Criar o gráfico
+        plt.figure(figsize=(10, 6))
+        if graph_type == "bar":
+            plt.bar(x_data, y_data)
+        elif graph_type == "line":
+            plt.plot(x_data, y_data)
+        elif graph_type == "pie":
+            if len(y_data) > 10:
+                return "Gráficos de pizza são melhores com no máximo 10 categorias."
+            plt.pie(y_data, labels=x_data, autopct='%1.1f%%')
+        else:
+            return f"Tipo de gráfico '{graph_type}' não suportado."
+        
+        plt.title(f"Gráfico do tipo {graph_type.capitalize()}")
+        plt.xlabel(x_col if x_col else "X")
+        plt.ylabel(y_col if y_col else "Y")
+
+        # Salvar o gráfico como imagem e codificar em base64
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png")
+        buf.seek(0)
+        base64_image = base64.b64encode(buf.read()).decode('utf-8')
+        buf.close()
+        plt.close()
+        
+        return base64_image
+    except Exception as e:
+        return f"Erro ao gerar o gráfico: {e}"
 
 
 def configurar_agente_sql(chat_history=None):
@@ -107,22 +166,86 @@ def configurar_agente_sql(chat_history=None):
     sql_developer_agent = Agent(
         role='Postgres analyst senior',
         goal="Sua função é fazer query no banco de dados referente a dados encontrados na table daily_report, quando necessário, de acordo com o pedido do usuário.",
-        backstory=f"""Você está conectado ao banco de dados que contém a tabela 'tenant_aperam.daily_report' com as seguintes colunas: {daily_report_schema_info}.
-        Para perguntas referentes ao banco de dados utilize a sua tool para fazer a busca no mesmo.
-        O tema principal do banco é sobre Relatórios diários de obra(column id), o dia referente a ele (column executed_at), data de criação (column created_at), id da obra (column project_id), data de aprovação (column approved_at), numéro sequencial (column sequence), quem criou o RDO (column user_username), horário de almoço (column lunch_start_time), termino do almoço (column lunch_end_time), horário do inicio do expediente (column work_start_time), horário do fim do expediente (column work_end_time), comentários (column comment), status do RDO (column status), nome de empreiteiro (column builder_name), dia de assinatura do empreiteiro (column builder_signed_at), quantidade de revisões (column revision_number) e data de importação (column _import_at)
-        Caso a pergunta seja algo fora do tema principal, retorne uma resposta baseado em seu conhecimento geral, relembre da sua função e do tema do banco sem mencionar o nome da tabela.
-        Você deve se lembrar de perguntas anteriores e utilizá-las como contexto para outras perguntas.""",
-        tools=[run_query],
+        backstory = f"""
+        Você é um analista experiente conectado a um banco de dados que contém a tabela 'tenant_aperam.daily_report', com as seguintes colunas: {daily_report_schema_info}.
+        Seu objetivo é responder perguntas relacionadas a essa tabela e fornecer informações claras e precisas. Utilize as ferramentas disponíveis para realizar consultas e gerar gráficos, seguindo estas diretrizes:
+
+        1. Tema principal do banco:
+        - Relatórios diários de obra, com as seguintes colunas:
+            - ID do relatório (column id)
+            - Data de execução (column executed_at)
+            - Data de criação (column created_at)
+            - ID da obra (column project_id)
+            - Data de aprovação (column approved_at)
+            - Número sequencial (column sequence)
+            - Usuário criador (column user_username)
+            - Início e término do almoço (columns lunch_start_time, lunch_end_time)
+            - Início e término do expediente (columns work_start_time, work_end_time)
+            - Comentários (column comment)
+            - Status do relatório (column status)
+            - Nome do empreiteiro (column builder_name)
+            - Data de assinatura do empreiteiro (column builder_signed_at)
+            - Quantidade de revisões (column revision_number)
+            - Data de importação (column _import_at)
+
+        2. Respostas baseadas no banco de dados:
+        - Utilize ferramentas para consultas ou geração de gráficos somente quando necessário.
+        - Ao usar ferramentas, siga rigorosamente este formato:
+            - Thought: Explique seu raciocínio.
+            - Action: Nome da ferramenta (run_query ou generate_graph).
+            - Action Input: Dados no formato JSON.
+
+        3. Perguntas fora do escopo do banco:
+        - Responda com seu conhecimento geral, sem mencionar a tabela diretamente.
+        - Sempre relembre a função principal: responder perguntas sobre relatórios diários de obra.
+
+        4. Uso de ferramentas:
+        - Nunca reutilize uma ferramenta já utilizada na mesma interação.
+        - Se não precisar de ferramentas, forneça uma resposta final no formato:
+            - Thought: Resuma seu raciocínio.
+            - Final Answer: Resposta clara e completa.
+
+        5. Contexto da conversa:
+        - Lembre-se de perguntas anteriores para oferecer respostas contextualizadas e coerentes.
+
+        Seu papel é ser eficiente, preciso e fornecer respostas claras, priorizando consultas no banco de dados relacionadas à tabela 'tenant_aperam.daily_report'.
+        """,
+
+        tools=[run_query, generate_graph],
         allow_delegation=False,
         verbose=True,
         memory=memory
     )
 
     sql_developer_task = Task(
-        description="""Construir uma consulta no banco para responder a pergunta: {question}, caso necessário considerando o contexto da conversa anterior: {chat_history} caso a pergunta seja referente a table daily_report do banco de dados.
-        Você deve realizar a query apenas se for necessário, saudações e perguntas não referentes ao tema do banco de dados não são necessárias o uso de querys.
-        Caso a pergunta seja fora do tema do banco, apenas responda o usuário com seu conhecimento geral.""",
-        expected_output="Caso a pergunta seja referente ao banco, preciso de uma resposta que apresente todos os dados obtidos pela query formulando a resposta a partir deles. Caso ocorra uma pergunta que não tenha relação com a table daily_report do banco de dados vinculado a você, com exessão de saudações, responda com seus conhecimentos gerais e ao fim traga diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final.",
+        description=
+        """Responda à pergunta do usuário ({question}) com base no tema principal do banco de dados, utilizando o contexto da conversa anterior ({chat_history}), se aplicável. Siga estas diretrizes:
+
+        1. **Consultas ao banco de dados**:
+        - Realize uma query apenas se for necessário para responder à pergunta.
+        - Utilize as ferramentas disponíveis (run_query ou generate_graph) seguindo o formato padrão:
+            - Thought: Explique o raciocínio.
+            - Action: Nome da ferramenta.
+            - Action Input: Entrada no formato JSON.
+        - Sempre considere as colunas da tabela `daily_report` ao construir consultas.
+
+        2. **Geração de gráficos**:
+        - Se solicitado, gere gráficos baseados nos dados obtidos pela query.
+        - Verifique a integridade dos dados antes de gerar o gráfico e escolha o tipo apropriado.
+
+        3. **Perguntas fora do tema do banco**:
+        - Se a pergunta não estiver relacionada ao banco de dados, responda com seu conhecimento geral.
+        - Não utilize ferramentas para perguntas não relacionadas à tabela `daily_report`.
+
+        4. **Saudações e perguntas gerais**:
+        - Não use ferramentas para responder saudações ou perguntas genéricas.
+
+        5. **Memória e contexto**:
+        - Utilize o histórico da conversa para formular respostas contextuais e coerentes.
+
+        Seu objetivo é fornecer respostas precisas, claras e úteis, priorizando o uso do banco de dados apenas quando necessário.
+        """,
+        expected_output="Caso a pergunta seja referente ao banco, preciso de uma resposta que apresente todos os dados obtidos pela query formulando a resposta a partir deles. Caso ocorra uma pergunta que não tenha relação com a table daily_report do banco de dados vinculado a você, com exessão de saudações, responda com seus conhecimentos gerais e ao fim traga diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final. Se for solicitado, formate os dados em um gráfico",
         agent=sql_developer_agent
     )
 
@@ -264,6 +387,7 @@ def buscar_embeddings_redis(redis_client, embeddings, user_input, k=3):
 
 
 # Main com integração do CrewAI e Redis
+# Main com integração do CrewAI e Redis
 def main():
     st.set_page_config(page_title="💬 Chat-oppem", page_icon="🤖")
     st.title("OppemBOT 🤖")
@@ -273,7 +397,6 @@ def main():
     if "messages" not in st.session_state:
         st.session_state["messages"] = [{"role": "assistant", "content": "Olá! Como posso ajudar você hoje?"}]
 
-
     # Exibir todas as mensagens do histórico na conversa
     for msg in st.session_state["messages"]:
         if msg["role"] == "user":
@@ -281,57 +404,68 @@ def main():
         elif msg["role"] == "assistant":
             st.chat_message("assistant").write(msg["content"])
 
+    # Configurar Redis e embeddings
     redis_client = conectar_redis()
     criar_indice_redis(redis_client)
 
     embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY, model="text-embedding-ada-002")
-    
+
     # Verificar se embeddings estão carregados no Redis
     if redis_client.exists("emb:0") == 0:
         textos = carregar_dados_postgresql()
         chunks = processar_texto(textos)
         armazenar_embeddings_redis(redis_client, embeddings, chunks)
 
+    # Capturar entrada do usuário
     user_input = st.chat_input("Você:")
-
     if user_input:
         st.session_state["messages"].append({"role": "user", "content": user_input})
         st.chat_message("user").write(user_input)
 
-        # Busca no Redis com histórico
+        # Inicializar resposta
+        response = None
+
+        # Buscar no Redis
         results = buscar_embeddings_redis(redis_client, embeddings, user_input)
-
-        result = None  # Inicializando result como None
-
-        # Verifique se resultados existem e se a lista de docs não está vazia
         if results and hasattr(results, "docs") and len(results.docs) > 0:
-            resposta = results.docs[0].content
-            st.session_state["messages"].append({"role": "assistant", "content": resposta})
-            st.chat_message("assistant").write(resposta)
+            response = results.docs[0].content
+            st.session_state["messages"].append({"role": "assistant", "content": response})
+            st.chat_message("assistant").write(response)
         else:
-            # Mensagem de depuração apenas no console, não no chat
+            # Mensagem de depuração
             print("Nenhum resultado encontrado no Redis. Tentando buscar no banco de dados...")
-            
+
+            # Buscar no banco de dados usando o agente
             try:
-                # Tentando buscar no banco de dados usando o agente
                 crew = configurar_agente_sql(chat_history=st.session_state["messages"])
                 result = crew.kickoff(inputs={'question': user_input, 'chat_history': st.session_state["messages"]})
-                result = vars(result)
+
+                # Verificar se o resultado contém os dados necessários
+                if hasattr(result, 'raw'):
+                    response = result.raw
+
+                    # Verificar se o usuário pediu um gráfico
+                    if "gráfico" in user_input.lower():
+                        if hasattr(result, 'data'):  # Verificar se 'data' está disponível no resultado
+                            graph_base64 = generate_graph(
+                                data=result.data,
+                                graph_type="bar"  # Ajuste o tipo de gráfico conforme necessário
+                            )
+                            if "Erro" not in graph_base64:
+                                response += f"\n\n![Gráfico](data:image/png;base64,{graph_base64})"
+                            else:
+                                response += f"\n\n{graph_base64}"
+                        else:
+                            response += "\n\nErro: Dados insuficientes para gerar o gráfico."
+
+                    st.session_state["messages"].append({"role": "assistant", "content": response})
+                    st.chat_message("assistant").write(response)
+                else:
+                    raise Exception("O agente não retornou nenhum resultado.")
             except Exception as e:
-                print(f"Erro ao executar o agente: {e}")
-                result = None  # Garantir que result seja None caso ocorra erro
-
-            # Verifique se result foi definido e não é None antes de tentar acessar
-            if result is not None:
-                resposta = result.get("raw")
-                st.session_state.messages.append({"role": "assistant", "content": resposta})
-                st.chat_message("assistant").write(resposta)
-            else:
-                # Mensagem de erro clara somente para o usuário
-                resposta = "Desculpe, não consegui encontrar a resposta no momento."
-                st.session_state["messages"].append({"role": "assistant", "content": resposta})
-                st.chat_message("assistant").write(resposta)
-
+                response = f"Erro ao executar o agente: {e}"
+                st.session_state["messages"].append({"role": "assistant", "content": response})
+                st.chat_message("assistant").write(response)
 
 
 if __name__ == "__main__":
