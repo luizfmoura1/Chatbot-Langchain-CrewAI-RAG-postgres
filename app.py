@@ -65,19 +65,91 @@ def get_daily_report_schema():
 # Função de execução de consulta para o agente SQL com depuração
 @tool("Execute query DB tool")
 def run_query(query: str):
-    """Execute uma query no banco de dados e retorne os dados formatados."""
+    """
+    Executa uma query no banco de dados PostgreSQL e retorna os dados em formato de lista de dicionários.
+
+    Parâmetros:
+        query (str): Query SQL a ser executada no banco de dados.
+
+    Retorna:
+        list: Lista de dicionários contendo os dados da consulta.
+    """
     connection = conectar_postgresql()
     cursor = connection.cursor()
-    print(f"Executando query: {query}")  # Debug para verificar a query
-    cursor.execute(query)
-    columns = [desc[0] for desc in cursor.description]  # Obter os nomes das colunas
-    rows = cursor.fetchall()
-    result = [dict(zip(columns, row)) for row in rows]  # Converter em lista de dicionários
-    print(f"Resultado da query: {result}")  # Debug para inspecionar o retorno
-    cursor.close()
-    connection.close()
-    return result
+    print(f"Executando query: {query}")  # Depuração da query
+    try:
+        cursor.execute(query)
+        columns = [desc[0] for desc in cursor.description]  # Obter os nomes das colunas
+        rows = cursor.fetchall()
+        if not rows:
+            print("A query não retornou nenhum resultado.")
+            return []
+        result = [dict(zip(columns, row)) for row in rows]
+        result = validate_and_prepare_data(result, cursor=cursor)
 
+        print(f"Resultado da query: {result}")  # Depuração do resultado
+        return result
+    except Exception as e:
+        print(f"Erro ao executar a query: {e}")
+        return []
+    finally:
+        cursor.close()
+        connection.close()
+
+
+
+def validate_and_prepare_data(data, cursor=None):
+    """
+    Valida e prepara os dados retornados pela query para garantir que estejam no formato esperado.
+
+    Parâmetros:
+        data (list): Dados retornados pela query.
+        cursor: Cursor usado para obter os nomes das colunas, se necessário.
+
+    Retorna:
+        list: Lista de dicionários representando os dados da query.
+    """
+    if not isinstance(data, list):
+        raise ValueError("Os dados não estão em um formato de lista.")
+    
+    if not all(isinstance(row, dict) for row in data):
+        if cursor:
+            columns = [desc[0] for desc in cursor.description]
+            data = [dict(zip(columns, row)) for row in data]
+        else:
+            raise ValueError("Os dados não podem ser convertidos para lista de dicionários.")
+    
+    return data
+
+def detect_columns(df):
+    """
+    Detecta automaticamente as colunas do DataFrame para os eixos X e Y.
+
+    Parâmetros:
+        df (DataFrame): DataFrame com os dados.
+
+    Retorna:
+        tuple: Nomes das colunas para os eixos X e Y.
+    """
+    if df.empty or len(df.columns) < 2:
+        raise ValueError("O DataFrame não contém colunas suficientes para gerar um gráfico.")
+    return df.columns[0], df.columns[1]
+
+def validate_chart_data(df, x_col, y_col):
+    """
+    Valida os dados do DataFrame para garantir que são adequados para a geração de gráficos.
+
+    Parâmetros:
+        df (DataFrame): DataFrame com os dados.
+        x_col (str): Coluna para o eixo X.
+        y_col (str): Coluna para o eixo Y.
+    """
+    if x_col not in df.columns or y_col not in df.columns:
+        raise ValueError(f"As colunas {x_col} e {y_col} não existem no DataFrame.")
+    if df[x_col].isnull().all() or df[y_col].isnull().all():
+        raise ValueError(f"As colunas {x_col} ou {y_col} contêm apenas valores nulos.")
+    if len(df[x_col]) != len(df[y_col]):
+        raise ValueError(f"As colunas {x_col} e {y_col} têm tamanhos incompatíveis.")
 
 
 
@@ -87,7 +159,7 @@ def generate_graph(data, graph_type="bar", x_col=None, y_col=None):
     Gera gráficos com base nos dados fornecidos.
 
     Parâmetros:
-        data (list): Dados obtidos pela query, em forma de lista.
+        data (list): Dados obtidos pela query, em forma de lista de dicionários.
         graph_type (str): Tipo de gráfico ('bar', 'line', 'pie', etc.). O padrão é 'bar'.
         x_col (str): Nome da coluna para o eixo X (opcional).
         y_col (str): Nome da coluna para o eixo Y (opcional).
@@ -95,19 +167,30 @@ def generate_graph(data, graph_type="bar", x_col=None, y_col=None):
     Retorna:
         str: Imagem do gráfico codificada em base64.
     """
+    validate_chart_data(df, x_col, y_col)
+
     try:
-        if not data:
-            return "Nenhum dado fornecido para gerar o gráfico."
+        if not data or len(data) == 0:
+            raise ValueError("A query não retornou nenhum dado.")
+
         
         import pandas as pd
         df = pd.DataFrame(data)
 
-        # Usar as primeiras duas colunas como padrão, se x_col ou y_col não forem fornecidos
-        if not x_col or not y_col:
-            x_col, y_col = df.columns[:2]
+        if df.empty:
+            return "Nenhum dado disponível no DataFrame para gerar o gráfico."
 
+        # Validação de colunas
+        if not x_col or not y_col:
+            x_col, y_col = detect_columns(df)  # Usar as primeiras duas colunas como padrão
+        if x_col not in df.columns or y_col not in df.columns:
+            return f"As colunas especificadas ({x_col}, {y_col}) não existem no DataFrame."
+
+        # Extração dos dados para os eixos
         x_data = df[x_col]
         y_data = df[y_col]
+        if x_data.empty or y_data.empty:
+            return "Os dados para os eixos X ou Y estão vazios."
 
         # Criar o gráfico
         plt.figure(figsize=(10, 6))
@@ -117,8 +200,9 @@ def generate_graph(data, graph_type="bar", x_col=None, y_col=None):
             plt.plot(x_data, y_data)
         elif graph_type == "pie":
             if len(y_data) > 10:
-                return "Gráficos de pizza são melhores com no máximo 10 categorias."
-            plt.pie(y_data, labels=x_data, autopct='%1.1f%%')
+                raise ValueError("Gráficos de pizza são melhores com no máximo 10 categorias.")
+            if not pd.api.types.is_numeric_dtype(y_data):
+                raise ValueError("Os valores do gráfico de pizza precisam ser numéricos.")
         else:
             return f"Tipo de gráfico '{graph_type}' não suportado."
         
@@ -133,10 +217,11 @@ def generate_graph(data, graph_type="bar", x_col=None, y_col=None):
         base64_image = base64.b64encode(buf.read()).decode('utf-8')
         buf.close()
         plt.close()
-        
+
         return base64_image
     except Exception as e:
         return f"Erro ao gerar o gráfico: {e}"
+
 
 
 
@@ -189,6 +274,9 @@ def configurar_agente_sql(chat_history=None):
             - Data de assinatura do empreiteiro (column builder_signed_at)
             - Quantidade de revisões (column revision_number)
             - Data de importação (column _import_at)
+            - approved = aprovado
+            - in_review = em análise
+            - in_approver = em aberto
 
         2. Respostas baseadas no banco de dados:
         - Utilize ferramentas para consultas ou geração de gráficos somente quando necessário.
@@ -229,7 +317,7 @@ def configurar_agente_sql(chat_history=None):
             - Thought: Explique o raciocínio.
             - Action: Nome da ferramenta.
             - Action Input: Entrada no formato JSON.
-        - Sempre considere as colunas da tabela `daily_report` ao construir consultas.
+        - Sempre considere as colunas da tabela daily_report ao construir consultas.
 
         2. **Geração de gráficos**:
         - Se solicitado, gere gráficos baseados nos dados obtidos pela query.
@@ -237,7 +325,7 @@ def configurar_agente_sql(chat_history=None):
 
         3. **Perguntas fora do tema do banco**:
         - Se a pergunta não estiver relacionada ao banco de dados, responda com seu conhecimento geral.
-        - Não utilize ferramentas para perguntas não relacionadas à tabela `daily_report`.
+        - Não utilize ferramentas para perguntas não relacionadas à tabela daily_report.
 
         4. **Saudações e perguntas gerais**:
         - Não use ferramentas para responder saudações ou perguntas genéricas.
@@ -448,8 +536,7 @@ def main():
 
                     # Verificar se o usuário pediu um gráfico
                     if "gráfico" in user_input.lower():
-                        if result and isinstance(result, list):
-                            # Passando os dados corretos para o generate_graph
+                        if result and isinstance(result, list) and len(result) > 0:
                             graph_base64 = generate_graph(
                                 data=result, 
                                 graph_type="bar",  # Altere para o tipo de gráfico desejado
@@ -465,6 +552,7 @@ def main():
 
 
 
+
                     st.session_state["messages"].append({"role": "assistant", "content": response})
                     st.chat_message("assistant").write(response)
                 else:
@@ -477,3 +565,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
