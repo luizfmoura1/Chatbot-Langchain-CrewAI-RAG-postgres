@@ -3,6 +3,9 @@ import streamlit as st
 import psycopg2
 import redis
 import numpy as np
+import matplotlib.pyplot as plt
+import io
+import base64
 from utils.text_processing import processar_texto
 from langchain_community.chat_models import ChatOpenAI
 from langchain.embeddings.openai import OpenAIEmbeddings
@@ -74,6 +77,9 @@ def run_query(query: str):
     connection.close()
     return result
 
+
+
+
 def configurar_agente_sql(chat_history=None):
     daily_report_schema_info = get_daily_report_schema()
 
@@ -103,8 +109,8 @@ def configurar_agente_sql(chat_history=None):
         goal="Sua função é fazer query no banco de dados referente a dados encontrados na table daily_report, quando necessário, de acordo com o pedido do usuário.",
         backstory=f"""Você está conectado ao banco de dados que contém a tabela 'tenant_aperam.daily_report' com as seguintes colunas: {daily_report_schema_info}.
         Para perguntas referentes ao banco de dados utilize a sua tool para fazer a busca no mesmo.
-        O tema principal do banco é sobre Relatórios diários de obra(column id), o dia referente a ele (column executed_at), data de criação (column created_at), id da obra (column project_id), data de aprovação (column approved_at), numéro sequencial (column sequence), quem criou o RDO (column user_username), horário de almoço (column lunch_start_time), termino do almoço (column lunch_end_time), horário do inicio do expediente (column work_start_time), horário do fim do expediente (column work_end_time) e os comentários (column comment).
-        Caso a pergunta seja algo fora do tema principal, retorne uma resposta baseado em seu conhecimento geral.
+        O tema principal do banco é sobre Relatórios diários de obra(column id), o dia referente a ele (column executed_at), data de criação (column created_at), id da obra (column project_id), data de aprovação (column approved_at), numéro sequencial (column sequence), quem criou o RDO (column user_username), horário de almoço (column lunch_start_time), termino do almoço (column lunch_end_time), horário do inicio do expediente (column work_start_time), horário do fim do expediente (column work_end_time), comentários (column comment), status do RDO (column status), nome de empreiteiro (column builder_name), dia de assinatura do empreiteiro (column builder_signed_at), quantidade de revisões (column revision_number) e data de importação (column _import_at)
+        Caso a pergunta seja algo fora do tema principal, retorne uma resposta baseado em seu conhecimento geral, relembre da sua função e do tema do banco sem mencionar o nome da tabela.
         Você deve se lembrar de perguntas anteriores e utilizá-las como contexto para outras perguntas.""",
         tools=[run_query],
         allow_delegation=False,
@@ -116,7 +122,7 @@ def configurar_agente_sql(chat_history=None):
         description="""Construir uma consulta no banco para responder a pergunta: {question}, caso necessário considerando o contexto da conversa anterior: {chat_history} caso a pergunta seja referente a table daily_report do banco de dados.
         Você deve realizar a query apenas se for necessário, saudações e perguntas não referentes ao tema do banco de dados não são necessárias o uso de querys.
         Caso a pergunta seja fora do tema do banco, apenas responda o usuário com seu conhecimento geral.""",
-        expected_output="Caso a pergunta seja referente ao banco, preciso de uma resposta que apresente todos os dados obtidos pela query formulando a resposta a partir deles. Caso ocorra uma pergunta que não tenha relação com a table daily_report do banco de dados vinculado a você, responda com seus conhecimentos gerais e ao fim traga diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final.",
+        expected_output="Caso a pergunta seja referente ao banco, preciso de uma resposta que apresente todos os dados obtidos pela query formulando a resposta a partir deles. Caso ocorra uma pergunta que não tenha relação com a table daily_report do banco de dados vinculado a você, com exessão de saudações, responda com seus conhecimentos gerais e ao fim traga diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final.",
         agent=sql_developer_agent
     )
 
