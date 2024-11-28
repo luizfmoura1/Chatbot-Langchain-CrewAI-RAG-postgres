@@ -304,7 +304,11 @@ def configurar_agente_sql(chat_history=None):
         tools=[run_query, generate_graph],
         allow_delegation=False,
         verbose=True,
-        memory=memory
+        memory=memory,
+    )
+
+    agente_grafico = Agent (
+
     )
 
     sql_developer_task = Task(
@@ -339,9 +343,13 @@ def configurar_agente_sql(chat_history=None):
         agent=sql_developer_agent
     )
 
+    agent_grafico_task = Tasks (
+            
+    )
+
     crew = Crew(
-        agents=[sql_developer_agent],
-        tasks=[sql_developer_task],
+        agents=[sql_developer_agent,agente_grafico],
+        tasks=[sql_developer_task,agent_grafico_task],
         process=Process.sequential,
         verbose=True
     )
