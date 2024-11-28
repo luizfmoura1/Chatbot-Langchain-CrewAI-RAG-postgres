@@ -65,163 +65,17 @@ def get_daily_report_schema():
 # Função de execução de consulta para o agente SQL com depuração
 @tool("Execute query DB tool")
 def run_query(query: str):
-    """
-    Executa uma query no banco de dados PostgreSQL e retorna os dados em formato de lista de dicionários.
-
-    Parâmetros:
-        query (str): Query SQL a ser executada no banco de dados.
-
-    Retorna:
-        list: Lista de dicionários contendo os dados da consulta.
-    """
+    """Execute a query no banco de dados e retorne os dados."""
     connection = conectar_postgresql()
     cursor = connection.cursor()
-    print(f"Executando query: {query}")  # Depuração da query
-    try:
-        cursor.execute(query)
-        columns = [desc[0] for desc in cursor.description]  # Obter os nomes das colunas
-        rows = cursor.fetchall()
-        if not rows:
-            print("A query não retornou nenhum resultado.")
-            return []
-        result = [dict(zip(columns, row)) for row in rows]
-        result = validate_and_prepare_data(result, cursor=cursor)
+    print(query)
 
-        print(f"Resultado da query: {result}")  # Depuração do resultado
-        return result
-    except Exception as e:
-        print(f"Erro ao executar a query: {e}")
-        return []
-    finally:
-        cursor.close()
-        connection.close()
-
-
-
-def validate_and_prepare_data(data, cursor=None):
-    """
-    Valida e prepara os dados retornados pela query para garantir que estejam no formato esperado.
-
-    Parâmetros:
-        data (list): Dados retornados pela query.
-        cursor: Cursor usado para obter os nomes das colunas, se necessário.
-
-    Retorna:
-        list: Lista de dicionários representando os dados da query.
-    """
-    if not isinstance(data, list):
-        raise ValueError("Os dados não estão em um formato de lista.")
-    
-    if not all(isinstance(row, dict) for row in data):
-        if cursor:
-            columns = [desc[0] for desc in cursor.description]
-            data = [dict(zip(columns, row)) for row in data]
-        else:
-            raise ValueError("Os dados não podem ser convertidos para lista de dicionários.")
-    
-    return data
-
-def detect_columns(df):
-    """
-    Detecta automaticamente as colunas do DataFrame para os eixos X e Y.
-
-    Parâmetros:
-        df (DataFrame): DataFrame com os dados.
-
-    Retorna:
-        tuple: Nomes das colunas para os eixos X e Y.
-    """
-    if df.empty or len(df.columns) < 2:
-        raise ValueError("O DataFrame não contém colunas suficientes para gerar um gráfico.")
-    return df.columns[0], df.columns[1]
-
-def validate_chart_data(df, x_col, y_col):
-    """
-    Valida os dados do DataFrame para garantir que são adequados para a geração de gráficos.
-
-    Parâmetros:
-        df (DataFrame): DataFrame com os dados.
-        x_col (str): Coluna para o eixo X.
-        y_col (str): Coluna para o eixo Y.
-    """
-    if x_col not in df.columns or y_col not in df.columns:
-        raise ValueError(f"As colunas {x_col} e {y_col} não existem no DataFrame.")
-    if df[x_col].isnull().all() or df[y_col].isnull().all():
-        raise ValueError(f"As colunas {x_col} ou {y_col} contêm apenas valores nulos.")
-    if len(df[x_col]) != len(df[y_col]):
-        raise ValueError(f"As colunas {x_col} e {y_col} têm tamanhos incompatíveis.")
-
-
-
-@tool("Generate Graph Tool")
-def generate_graph(data, graph_type="bar", x_col=None, y_col=None):
-    """
-    Gera gráficos com base nos dados fornecidos.
-
-    Parâmetros:
-        data (list): Dados obtidos pela query, em forma de lista de dicionários.
-        graph_type (str): Tipo de gráfico ('bar', 'line', 'pie', etc.). O padrão é 'bar'.
-        x_col (str): Nome da coluna para o eixo X (opcional).
-        y_col (str): Nome da coluna para o eixo Y (opcional).
-
-    Retorna:
-        str: Imagem do gráfico codificada em base64.
-    """
-    validate_chart_data(df, x_col, y_col)
-
-    try:
-        if not data or len(data) == 0:
-            raise ValueError("A query não retornou nenhum dado.")
-
-        
-        import pandas as pd
-        df = pd.DataFrame(data)
-
-        if df.empty:
-            return "Nenhum dado disponível no DataFrame para gerar o gráfico."
-
-        # Validação de colunas
-        if not x_col or not y_col:
-            x_col, y_col = detect_columns(df)  # Usar as primeiras duas colunas como padrão
-        if x_col not in df.columns or y_col not in df.columns:
-            return f"As colunas especificadas ({x_col}, {y_col}) não existem no DataFrame."
-
-        # Extração dos dados para os eixos
-        x_data = df[x_col]
-        y_data = df[y_col]
-        if x_data.empty or y_data.empty:
-            return "Os dados para os eixos X ou Y estão vazios."
-
-        # Criar o gráfico
-        plt.figure(figsize=(10, 6))
-        if graph_type == "bar":
-            plt.bar(x_data, y_data)
-        elif graph_type == "line":
-            plt.plot(x_data, y_data)
-        elif graph_type == "pie":
-            if len(y_data) > 10:
-                raise ValueError("Gráficos de pizza são melhores com no máximo 10 categorias.")
-            if not pd.api.types.is_numeric_dtype(y_data):
-                raise ValueError("Os valores do gráfico de pizza precisam ser numéricos.")
-        else:
-            return f"Tipo de gráfico '{graph_type}' não suportado."
-        
-        plt.title(f"Gráfico do tipo {graph_type.capitalize()}")
-        plt.xlabel(x_col)
-        plt.ylabel(y_col)
-
-        # Salvar o gráfico como imagem e codificar em base64
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png")
-        buf.seek(0)
-        base64_image = base64.b64encode(buf.read()).decode('utf-8')
-        buf.close()
-        plt.close()
-
-        return base64_image
-    except Exception as e:
-        return f"Erro ao gerar o gráfico: {e}"
-
+    cursor.execute(query)
+    result = cursor.fetchall()
+    print("Resultado da query:", result)  # Exibe o resultado da query para depuração
+    cursor.close()
+    connection.close()
+    return result
 
 
 
@@ -249,7 +103,6 @@ def configurar_agente_sql(chat_history=None):
             elif msg["role"] == "assistant":
                 memory.chat_memory.add_ai_message(msg["content"])
 
-     # Configurar o agente com a memória atualizada
     sql_developer_agent = Agent(
         role='Postgres analyst senior',
         goal="Sua função é fazer query no banco de dados referente a dados encontrados na table daily_report, quando necessário, de acordo com o pedido do usuário. E se for requisitado, você deve gerar umgráfico baseados nos dados obtidos pela query.",
@@ -301,73 +154,11 @@ def configurar_agente_sql(chat_history=None):
         Seu papel é ser eficiente, preciso e fornecer respostas claras, priorizando consultas no banco de dados relacionadas à tabela 'tenant_aperam.daily_report'.
         """,
 
-        tools=[run_query, generate_graph],
+        tools=[run_query,],
         allow_delegation=False,
         verbose=True,
         memory=memory,
     )
-
-    graph_generator_agent = Agent(
-    role='Graph generator specialist',
-    goal="Sua função é gerar gráficos com base em dados encontrados pelas queries realizadas pelo agente de análise de banco de dados (SQL Developer Agent), de acordo com o pedido do usuário.",
-    backstory = f"""
-    Você é um especialista em geração de gráficos. Seu objetivo é criar gráficos claros e informativos utilizando os dados fornecidos pelo agente de análise de banco de dados (SQL Developer Agent), que consulta a tabela 'tenant_aperam.daily_report'. A tabela possui as seguintes colunas: {daily_report_schema_info}.
-    Siga estas diretrizes para cumprir seu papel:
-
-    1. Fonte dos dados:
-    - Os dados utilizados para criar os gráficos são fornecidos pelo SQL Developer Agent, que realiza queries no banco de dados e fornece os resultados para você.
-
-    2. Tema principal do banco:
-    - Relatórios diários de obra, com as seguintes colunas:
-        - ID do relatório (column id)
-        - Data de execução (column executed_at)
-        - Data de criação (column created_at)
-        - ID da obra (column project_id)
-        - Data de aprovação (column approved_at)
-        - Número sequencial (column sequence)
-        - Usuário criador (column user_username)
-        - Início e término do almoço (columns lunch_start_time, lunch_end_time)
-        - Início e término do expediente (columns work_start_time, work_end_time)
-        - Comentários (column comment)
-        - Status do relatório (column status)
-        - Nome do empreiteiro (column builder_name)
-        - Data de assinatura do empreiteiro (column builder_signed_at)
-        - Quantidade de revisões (column revision_number)
-        - Data de importação (column _import_at)
-        - approved = aprovado
-        - in_review = em análise
-        - in_approver = em aberto
-
-    3. Regras para geração de gráficos:
-    - Gere gráficos somente com base nos dados fornecidos pelo SQL Developer Agent.
-    - Utilize ferramentas para criar gráficos, seguindo este formato:
-        - Thought: Explique seu raciocínio.
-        - Action: Nome da ferramenta (generate_graph).
-        - Action Input: Dados no formato JSON descrevendo o tipo de gráfico e as colunas a serem usadas.
-
-    4. Tipos de gráficos disponíveis:
-    - Gráficos de barras
-    - Gráficos de pizza
-    - Gráficos de linha
-    - Gráficos de dispersão
-    - Outros formatos, conforme o pedido do usuário, se os dados permitirem.
-
-    5. Requisitos para a criação de gráficos:
-    - Valide se os dados fornecidos pelo SQL Developer Agent são suficientes e adequados para criar o gráfico solicitado.
-    - Solicite informações claras ao usuário sobre o tipo de gráfico e a apresentação desejada.
-    - Caso os dados fornecidos não sejam suficientes ou claros, peça ao SQL Developer Agent para realizar uma nova query com os parâmetros necessários.
-
-    6. Contexto da conversa:
-    - Lembre-se de perguntas e dados fornecidos anteriormente para criar gráficos coerentes e alinhados ao contexto.
-    - Se o pedido não for claro, peça esclarecimentos ao usuário antes de prosseguir.
-
-    7. Restrições:
-    - Nunca consulte o banco de dados diretamente. Sempre utilize os dados fornecidos pelo SQL Developer Agent.
-    - Se os dados necessários não estiverem disponíveis, forneça uma resposta explicativa e solicite novos dados ao SQL Developer Agent.
-
-    Seu papel é ser eficiente, visualmente claro e fornecer gráficos informativos, utilizando exclusivamente os dados fornecidos pelas queries realizadas pelo SQL Developer Agent.
-    """
-)
 
     sql_developer_task = Task(
     description=
@@ -397,45 +188,9 @@ def configurar_agente_sql(chat_history=None):
     agent=sql_developer_agent
 )
 
-
-    graph_generator_task = Task(
-    description=
-    """Gere um gráfico com base nos dados fornecidos ({data}) pelo agente SQL Developer Agent. Siga estas diretrizes:
-
-    1. **Validação dos dados**:
-    - Certifique-se de que os dados fornecidos são suficientes e adequados para criar o gráfico solicitado.
-    - Se os dados não forem suficientes ou claros, peça ao SQL Developer Agent uma nova query para corrigir o problema.
-
-    2. **Criação do gráfico**:
-    - Utilize a ferramenta (generate_graph) seguindo este formato:
-        - Thought: Explique o raciocínio.
-        - Action: Nome da ferramenta.
-        - Action Input: Descreva o tipo de gráfico e os dados a serem usados no formato JSON.
-    - Os tipos de gráficos disponíveis incluem:
-        - Gráficos de barras
-        - Gráficos de pizza
-        - Gráficos de linha
-        - Gráficos de dispersão
-        - Outros formatos, dependendo do pedido do usuário e dos dados disponíveis.
-
-    3. **Respostas claras e contextuais**:
-    - Explique o motivo de sua escolha de gráfico com base nos dados e no pedido do usuário.
-    - Se o pedido não for claro, solicite mais informações ao usuário antes de prosseguir.
-
-    4. **Restrições**:
-    - Nunca consulte o banco de dados diretamente. Trabalhe exclusivamente com os dados fornecidos pelo SQL Developer Agent.
-    - Caso não seja possível criar o gráfico solicitado, forneça uma explicação clara do motivo e oriente sobre como proceder.
-
-    Seu objetivo é fornecer gráficos informativos e claros, utilizando exclusivamente os dados fornecidos pelo SQL Developer Agent e respeitando as preferências e o contexto dados pelo usuário.
-    """,
-    expected_output="O gráfico gerado deve estar alinhado ao pedido do usuário e ser visualmente claro. Caso o pedido seja ambíguo ou os dados sejam insuficientes, deve ser feita uma solicitação clara para mais informações ou novos dados ao SQL Developer Agent. Explique o raciocínio por trás do gráfico escolhido, e se necessário, sugira alternativas de visualização para melhor representar os dados.",
-    agent=graph_generator_agent
-)
-
-
     crew = Crew(
-        agents=[sql_developer_agent, graph_generator_agent],
-        tasks=[sql_developer_task, graph_generator_task],
+        agents=[sql_developer_agent],
+        tasks=[sql_developer_task],
         process=Process.sequential,
         verbose=True
     )
@@ -571,7 +326,6 @@ def buscar_embeddings_redis(redis_client, embeddings, user_input, k=3):
 
 
 # Main com integração do CrewAI e Redis
-# Main com integração do CrewAI e Redis
 def main():
     st.set_page_config(page_title="💬 Chat-oppem", page_icon="🤖")
     st.title("OppemBOT 🤖")
@@ -581,6 +335,7 @@ def main():
     if "messages" not in st.session_state:
         st.session_state["messages"] = [{"role": "assistant", "content": "Olá! Como posso ajudar você hoje?"}]
 
+
     # Exibir todas as mensagens do histórico na conversa
     for msg in st.session_state["messages"]:
         if msg["role"] == "user":
@@ -588,75 +343,58 @@ def main():
         elif msg["role"] == "assistant":
             st.chat_message("assistant").write(msg["content"])
 
-    # Configurar Redis e embeddings
     redis_client = conectar_redis()
     criar_indice_redis(redis_client)
 
     embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY, model="text-embedding-ada-002")
-
+    
     # Verificar se embeddings estão carregados no Redis
     if redis_client.exists("emb:0") == 0:
         textos = carregar_dados_postgresql()
         chunks = processar_texto(textos)
         armazenar_embeddings_redis(redis_client, embeddings, chunks)
 
-    # Capturar entrada do usuário
     user_input = st.chat_input("Você:")
+
     if user_input:
         st.session_state["messages"].append({"role": "user", "content": user_input})
         st.chat_message("user").write(user_input)
 
-        # Inicializar resposta
-        response = None
-
-        # Buscar no Redis
+        # Busca no Redis com histórico
         results = buscar_embeddings_redis(redis_client, embeddings, user_input)
-        if results and hasattr(results, "docs") and len(results.docs) > 0:
-            response = results.docs[0].content
-            st.session_state["messages"].append({"role": "assistant", "content": response})
-            st.chat_message("assistant").write(response)
-        else:
-            # Mensagem de depuração
-            print("Nenhum resultado encontrado no Redis. Tentando buscar no banco de dados...")
 
-            # Buscar no banco de dados usando o agente
+        result = None  # Inicializando result como None
+
+        # Verifique se resultados existem e se a lista de docs não está vazia
+        if results and hasattr(results, "docs") and len(results.docs) > 0:
+            resposta = results.docs[0].content
+            st.session_state["messages"].append({"role": "assistant", "content": resposta})
+            st.chat_message("assistant").write(resposta)
+        else:
+            # Mensagem de depuração apenas no console, não no chat
+            print("Nenhum resultado encontrado no Redis. Tentando buscar no banco de dados...")
+            
             try:
+                # Tentando buscar no banco de dados usando o agente
                 crew = configurar_agente_sql(chat_history=st.session_state["messages"])
                 result = crew.kickoff(inputs={'question': user_input, 'chat_history': st.session_state["messages"]})
-
-                # Verificar se o resultado contém os dados necessários
-                if hasattr(result, 'raw'):
-                    response = result.raw
-
-                    # Verificar se o usuário pediu um gráfico
-                    if "gráfico" in user_input.lower():
-                        if result and isinstance(result, list) and len(result) > 0:
-                            graph_base64 = generate_graph(
-                                data=result, 
-                                graph_type="bar",  # Altere para o tipo de gráfico desejado
-                                x_col="Categoria",  # Substitua pelos nomes corretos das colunas
-                                y_col="Quantidade"
-                            )
-                            if "Erro" not in graph_base64:
-                                response += f"\n\n![Gráfico](data:image/png;base64,{graph_base64})"
-                            else:
-                                response += f"\n\nErro ao gerar gráfico: {graph_base64}"
-                        else:
-                            response += "\n\nErro: Dados insuficientes para gerar o gráfico."
-
-
-
-
-                    st.session_state["messages"].append({"role": "assistant", "content": response})
-                    st.chat_message("assistant").write(response)
-                else:
-                    raise Exception("O agente não retornou nenhum resultado.")
+                result = vars(result)
             except Exception as e:
-                response = f"Erro ao executar o agente: {e}"
-                st.session_state["messages"].append({"role": "assistant", "content": response})
-                st.chat_message("assistant").write(response)
+                print(f"Erro ao executar o agente: {e}")
+                result = None  # Garantir que result seja None caso ocorra erro
+
+            # Verifique se result foi definido e não é None antes de tentar acessar
+            if result is not None:
+                resposta = result.get("raw")
+                st.session_state.messages.append({"role": "assistant", "content": resposta})
+                st.chat_message("assistant").write(resposta)
+            else:
+                # Mensagem de erro clara somente para o usuário
+                resposta = "Desculpe, não consegui encontrar a resposta no momento."
+                st.session_state["messages"].append({"role": "assistant", "content": resposta})
+                st.chat_message("assistant").write(resposta)
+
 
 
 if __name__ == "__main__":
     main()
-
