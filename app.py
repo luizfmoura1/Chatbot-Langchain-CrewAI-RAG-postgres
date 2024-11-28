@@ -3,9 +3,7 @@ import streamlit as st
 import psycopg2
 import redis
 import numpy as np
-import matplotlib.pyplot as plt
-import io
-import base64
+from pydantic import BaseModel, Field
 from utils.text_processing import processar_texto
 from langchain_community.chat_models import ChatOpenAI
 from langchain.embeddings.openai import OpenAIEmbeddings
@@ -85,7 +83,7 @@ def configurar_agente_sql(chat_history=None):
 
     llm = ChatOpenAI(
         openai_api_key=OPENAI_API_KEY,
-        temperature=0,
+        temperature=0.1,
         model_name="gpt-4o-mini",
         max_tokens=1000
     )
@@ -102,6 +100,10 @@ def configurar_agente_sql(chat_history=None):
                 memory.chat_memory.add_user_message(msg["content"])
             elif msg["role"] == "assistant":
                 memory.chat_memory.add_ai_message(msg["content"])
+
+    class Graph(BaseModel):
+        option_graph: bool = Field(description = 'O usuário citou a palavra gráfico na pergunta')
+        
 
     sql_developer_agent = Agent(
         role='Postgres analyst senior',
@@ -183,9 +185,14 @@ def configurar_agente_sql(chat_history=None):
     - Utilize o histórico da conversa para formular respostas contextuais e coerentes.
 
     Seu objetivo é fornecer respostas precisas, claras e úteis, priorizando o uso do banco de dados apenas quando necessário.
+    Caso a pergunta envolva a palavra gráfico, faça uma resposta utilizando os dados encontrados pela query, como se você estivesse montando um gráfico com esses dados, sugira também o tipo de gráfico que você prefere na situação.
     """,
-    expected_output="Caso a pergunta seja referente ao banco, preciso de uma resposta que apresente todos os dados obtidos pela query formulando a resposta a partir deles. Caso ocorra uma pergunta que não tenha relação com a table daily_report do banco de dados vinculado a você, com exceção de saudações, responda com seus conhecimentos gerais e ao fim diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final.",
-    agent=sql_developer_agent
+    expected_output="""Caso a pergunta seja referente ao banco, preciso de uma resposta que apresente todos os dados obtidos pela query formulando a resposta a partir deles. 
+    Caso ocorra uma pergunta que não tenha relação com a table daily_report do banco de dados vinculado a você, com exceção de saudações, responda com seus conhecimentos gerais e ao fim diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. 
+    Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final.
+    Caso tenha a palavra gráfico na pergunta, responda o pydantic com True ou False""",
+    agent=sql_developer_agent,
+    output_pydantic=Graph
 )
 
     crew = Crew(
@@ -382,17 +389,57 @@ def main():
             except Exception as e:
                 print(f"Erro ao executar o agente: {e}")
                 result = None  # Garantir que result seja None caso ocorra erro
+            graph_condition = result.get("pydantic")
+            if graph_condition.option_graph == True:
+                graph_agent = Agent(
+                    role='Postgres analyst senior',
+                    goal="Sua função é fazer um gráfico por meio de código e retorna-lo",
+                    backstory ="""Você é um programador especialista em matplotlib e plotar gráficos por código em geral""",
+                    code_execution_mode="unsafe",
+                    allow_code_execution=True,
+                    allow_delegation=False,
+                    verbose=True,
+                )
 
-            # Verifique se result foi definido e não é None antes de tentar acessar
-            if result is not None:
-                resposta = result.get("raw")
-                st.session_state.messages.append({"role": "assistant", "content": resposta})
-                st.chat_message("assistant").write(resposta)
-            else:
+                graph_agent_task = Task(
+                    description=
+                    """Sua tarefa é fazer um gráfico utilizando code e matplotlib para as informações a seguir:
+                    {infos}
+                    Quero que as informações do gráfico sejam em português-BR, e o dpi da imagem deve ser 50dpi.
+                    E neste código salve o gráfico como png no caminho graph.png e retorne um valor booleano informando se o gráfico foi salvo ou não como resposta final da sua execução.""",
+                    expected_output="""É esperado um gráfico com as informações solicitadas, e um valor booleano sinalizando como foi a execução do código.""",
+                    agent=graph_agent,
+                )
+
+                graph_crew = Crew(
+                    agents=[graph_agent],
+                    tasks=[graph_agent_task],
+                    verbose=True
+                )
+                graph_result = graph_crew.kickoff(inputs = {'infos': result.get('raw')})
+
+                # Verifique se result foi definido e não é None antes de tentar acessar
+                if graph_result is not None:
+                    imagem_caminho = 'graph.png'
+                    st.session_state.messages.append({"role": "assistant", "content": f"Imagem: {imagem_caminho}"})
+                    # Exibe a imagem como resposta
+                    st.chat_message("assistant").image(imagem_caminho, caption="Aqui está a imagem solicitada!")
+                else:
                 # Mensagem de erro clara somente para o usuário
-                resposta = "Desculpe, não consegui encontrar a resposta no momento."
-                st.session_state["messages"].append({"role": "assistant", "content": resposta})
-                st.chat_message("assistant").write(resposta)
+                    resposta = "Desculpe, não consegui encontrar a resposta no momento."
+                    st.session_state["messages"].append({"role": "assistant", "content": resposta})
+                    st.chat_message("assistant").write(resposta)
+            else:
+                # Verifique se result foi definido e não é None antes de tentar acessar
+                if result is not None:
+                    resposta = result.get("raw")
+                    st.session_state.messages.append({"role": "assistant", "content": resposta})
+                    st.chat_message("assistant").write(resposta)
+                else:
+                    # Mensagem de erro clara somente para o usuário
+                    resposta = "Desculpe, não consegui encontrar a resposta no momento."
+                    st.session_state["messages"].append({"role": "assistant", "content": resposta})
+                    st.chat_message("assistant").write(resposta)
 
 
 
