@@ -307,49 +307,135 @@ def configurar_agente_sql(chat_history=None):
         memory=memory,
     )
 
-    agente_grafico = Agent (
+    graph_generator_agent = Agent(
+    role='Graph generator specialist',
+    goal="Sua função é gerar gráficos com base em dados encontrados pelas queries realizadas pelo agente de análise de banco de dados (SQL Developer Agent), de acordo com o pedido do usuário.",
+    backstory = f"""
+    Você é um especialista em geração de gráficos. Seu objetivo é criar gráficos claros e informativos utilizando os dados fornecidos pelo agente de análise de banco de dados (SQL Developer Agent), que consulta a tabela 'tenant_aperam.daily_report'. A tabela possui as seguintes colunas: {daily_report_schema_info}.
+    Siga estas diretrizes para cumprir seu papel:
 
-    )
+    1. Fonte dos dados:
+    - Os dados utilizados para criar os gráficos são fornecidos pelo SQL Developer Agent, que realiza queries no banco de dados e fornece os resultados para você.
+
+    2. Tema principal do banco:
+    - Relatórios diários de obra, com as seguintes colunas:
+        - ID do relatório (column id)
+        - Data de execução (column executed_at)
+        - Data de criação (column created_at)
+        - ID da obra (column project_id)
+        - Data de aprovação (column approved_at)
+        - Número sequencial (column sequence)
+        - Usuário criador (column user_username)
+        - Início e término do almoço (columns lunch_start_time, lunch_end_time)
+        - Início e término do expediente (columns work_start_time, work_end_time)
+        - Comentários (column comment)
+        - Status do relatório (column status)
+        - Nome do empreiteiro (column builder_name)
+        - Data de assinatura do empreiteiro (column builder_signed_at)
+        - Quantidade de revisões (column revision_number)
+        - Data de importação (column _import_at)
+        - approved = aprovado
+        - in_review = em análise
+        - in_approver = em aberto
+
+    3. Regras para geração de gráficos:
+    - Gere gráficos somente com base nos dados fornecidos pelo SQL Developer Agent.
+    - Utilize ferramentas para criar gráficos, seguindo este formato:
+        - Thought: Explique seu raciocínio.
+        - Action: Nome da ferramenta (generate_graph).
+        - Action Input: Dados no formato JSON descrevendo o tipo de gráfico e as colunas a serem usadas.
+
+    4. Tipos de gráficos disponíveis:
+    - Gráficos de barras
+    - Gráficos de pizza
+    - Gráficos de linha
+    - Gráficos de dispersão
+    - Outros formatos, conforme o pedido do usuário, se os dados permitirem.
+
+    5. Requisitos para a criação de gráficos:
+    - Valide se os dados fornecidos pelo SQL Developer Agent são suficientes e adequados para criar o gráfico solicitado.
+    - Solicite informações claras ao usuário sobre o tipo de gráfico e a apresentação desejada.
+    - Caso os dados fornecidos não sejam suficientes ou claros, peça ao SQL Developer Agent para realizar uma nova query com os parâmetros necessários.
+
+    6. Contexto da conversa:
+    - Lembre-se de perguntas e dados fornecidos anteriormente para criar gráficos coerentes e alinhados ao contexto.
+    - Se o pedido não for claro, peça esclarecimentos ao usuário antes de prosseguir.
+
+    7. Restrições:
+    - Nunca consulte o banco de dados diretamente. Sempre utilize os dados fornecidos pelo SQL Developer Agent.
+    - Se os dados necessários não estiverem disponíveis, forneça uma resposta explicativa e solicite novos dados ao SQL Developer Agent.
+
+    Seu papel é ser eficiente, visualmente claro e fornecer gráficos informativos, utilizando exclusivamente os dados fornecidos pelas queries realizadas pelo SQL Developer Agent.
+    """
+)
 
     sql_developer_task = Task(
-        description=
-        """Responda à pergunta do usuário ({question}) com base no tema principal do banco de dados, utilizando o contexto da conversa anterior ({chat_history}), se aplicável. Siga estas diretrizes:
+    description=
+    """Responda à pergunta do usuário ({question}) com base no tema principal do banco de dados, utilizando o contexto da conversa anterior ({chat_history}), se aplicável. Siga estas diretrizes:
 
-        1. **Consultas ao banco de dados**:
-        - Realize uma query apenas se for necessário para responder à pergunta.
-        - Utilize as ferramentas disponíveis (run_query ou generate_graph) seguindo o formato padrão:
-            - Thought: Explique o raciocínio.
-            - Action: Nome da ferramenta.
-            - Action Input: Entrada no formato JSON.
-        - Sempre considere as colunas da tabela daily_report ao construir consultas.
+    1. **Consultas ao banco de dados**:
+    - Realize uma query apenas se for necessário para responder à pergunta.
+    - Utilize as ferramentas disponíveis (run_query) seguindo o formato padrão:
+        - Thought: Explique o raciocínio.
+        - Action: Nome da ferramenta.
+        - Action Input: Entrada no formato JSON.
+    - Sempre considere as colunas da tabela daily_report ao construir consultas.
 
-        2. **Geração de gráficos**:
-        - Se solicitado, gere gráficos baseados nos dados obtidos pela query.
-        - Verifique a integridade dos dados antes de gerar o gráfico e escolha o tipo apropriado.
+    2. **Perguntas fora do tema do banco**:
+    - Se a pergunta não estiver relacionada ao banco de dados, responda com seu conhecimento geral.
+    - Não utilize ferramentas para perguntas não relacionadas à tabela daily_report.
 
-        3. **Perguntas fora do tema do banco**:
-        - Se a pergunta não estiver relacionada ao banco de dados, responda com seu conhecimento geral.
-        - Não utilize ferramentas para perguntas não relacionadas à tabela daily_report.
+    3. **Saudações e perguntas gerais**:
+    - Não use ferramentas para responder saudações ou perguntas genéricas.
 
-        4. **Saudações e perguntas gerais**:
-        - Não use ferramentas para responder saudações ou perguntas genéricas.
+    4. **Memória e contexto**:
+    - Utilize o histórico da conversa para formular respostas contextuais e coerentes.
 
-        5. **Memória e contexto**:
-        - Utilize o histórico da conversa para formular respostas contextuais e coerentes.
+    Seu objetivo é fornecer respostas precisas, claras e úteis, priorizando o uso do banco de dados apenas quando necessário.
+    """,
+    expected_output="Caso a pergunta seja referente ao banco, preciso de uma resposta que apresente todos os dados obtidos pela query formulando a resposta a partir deles. Caso ocorra uma pergunta que não tenha relação com a table daily_report do banco de dados vinculado a você, com exceção de saudações, responda com seus conhecimentos gerais e ao fim diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final.",
+    agent=sql_developer_agent
+)
 
-        Seu objetivo é fornecer respostas precisas, claras e úteis, priorizando o uso do banco de dados apenas quando necessário.
-        """,
-        expected_output="Caso a pergunta seja referente ao banco, preciso de uma resposta que apresente todos os dados obtidos pela query formulando a resposta a partir deles. Caso ocorra uma pergunta que não tenha relação com a table daily_report do banco de dados vinculado a você, com exessão de saudações, responda com seus conhecimentos gerais e ao fim traga diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final. Se for solicitado, formate os dados em um gráfico",
-        agent=sql_developer_agent
-    )
 
-    agent_grafico_task = Tasks (
-            
-    )
+    graph_generator_task = Task(
+    description=
+    """Gere um gráfico com base nos dados fornecidos ({data}) pelo agente SQL Developer Agent. Siga estas diretrizes:
+
+    1. **Validação dos dados**:
+    - Certifique-se de que os dados fornecidos são suficientes e adequados para criar o gráfico solicitado.
+    - Se os dados não forem suficientes ou claros, peça ao SQL Developer Agent uma nova query para corrigir o problema.
+
+    2. **Criação do gráfico**:
+    - Utilize a ferramenta (generate_graph) seguindo este formato:
+        - Thought: Explique o raciocínio.
+        - Action: Nome da ferramenta.
+        - Action Input: Descreva o tipo de gráfico e os dados a serem usados no formato JSON.
+    - Os tipos de gráficos disponíveis incluem:
+        - Gráficos de barras
+        - Gráficos de pizza
+        - Gráficos de linha
+        - Gráficos de dispersão
+        - Outros formatos, dependendo do pedido do usuário e dos dados disponíveis.
+
+    3. **Respostas claras e contextuais**:
+    - Explique o motivo de sua escolha de gráfico com base nos dados e no pedido do usuário.
+    - Se o pedido não for claro, solicite mais informações ao usuário antes de prosseguir.
+
+    4. **Restrições**:
+    - Nunca consulte o banco de dados diretamente. Trabalhe exclusivamente com os dados fornecidos pelo SQL Developer Agent.
+    - Caso não seja possível criar o gráfico solicitado, forneça uma explicação clara do motivo e oriente sobre como proceder.
+
+    Seu objetivo é fornecer gráficos informativos e claros, utilizando exclusivamente os dados fornecidos pelo SQL Developer Agent e respeitando as preferências e o contexto dados pelo usuário.
+    """,
+    expected_output="O gráfico gerado deve estar alinhado ao pedido do usuário e ser visualmente claro. Caso o pedido seja ambíguo ou os dados sejam insuficientes, deve ser feita uma solicitação clara para mais informações ou novos dados ao SQL Developer Agent. Explique o raciocínio por trás do gráfico escolhido, e se necessário, sugira alternativas de visualização para melhor representar os dados.",
+    agent=graph_generator_agent
+)
+
 
     crew = Crew(
-        agents=[sql_developer_agent,agente_grafico],
-        tasks=[sql_developer_task,agent_grafico_task],
+        agents=[sql_developer_agent, graph_generator_agent],
+        tasks=[sql_developer_task, graph_generator_task],
         process=Process.sequential,
         verbose=True
     )
