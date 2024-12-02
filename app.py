@@ -3,7 +3,6 @@ import streamlit as st
 import psycopg2
 import redis
 import numpy as np
-from pydantic import BaseModel, Field
 from utils.text_processing import processar_texto
 from langchain_community.chat_models import ChatOpenAI
 from langchain.embeddings.openai import OpenAIEmbeddings
@@ -63,9 +62,6 @@ def run_query_multi_table(query: str):
     return result
 
 
-
-
-
 def configurar_agente_sql(chat_history=None):
     daily_report_schema_info = get_table_schema("daily_report")
     project_schema_info = get_table_schema("project")
@@ -89,11 +85,6 @@ def configurar_agente_sql(chat_history=None):
                 memory.chat_memory.add_user_message(msg["content"])
             elif msg["role"] == "assistant":
                 memory.chat_memory.add_ai_message(msg["content"])
-
-    #class Graph(BaseModel):
-        #option_graph: bool = Field(description='A palavra "gráfico" foi está presente na pergunta atual do usuário?')
-
-        
 
     sql_developer_agent = Agent(
         role='Postgres analyst senior',
@@ -209,10 +200,9 @@ def configurar_agente_sql(chat_history=None):
     Caso ocorra uma pergunta que não tenha relação com as tabelas daily_report e project do banco de dados vinculado a você, com exceção de saudações, responda com seus conhecimentos gerais e ao fim diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. 
     Se você encontrar a resposta no banco de dados, responda apenas a pergunta de elaborada, sem lembrar sua função no final.
     A consulta SQL deve incluir as tabelas relevantes. Se ambas forem necessárias, a query deve ser um JOIN entre 'daily_report' e 'project'.
-    O objeto pydantic deve conter o campo `option_graph` definido como `True` ou `False`, dependendo da presença da palavra "gráfico" na pergunta do usuário.
     Responda à pergunta de forma apropriada, seguindo as diretrizes acima.""",
     agent=sql_developer_agent,
-    #output_pydantic=Graph
+    
 )
 
     crew = Crew(
@@ -223,7 +213,6 @@ def configurar_agente_sql(chat_history=None):
     )
 
     return crew
-
 
 
 # Carregar dados do PostgreSQL
@@ -277,10 +266,6 @@ def criar_indice_redis(redis_client):
 
 
 
-
-
-
-
 def armazenar_embeddings_redis(redis_client, embeddings, textos):
     for idx, chunk in enumerate(textos):
         # Verificar se o embedding já existe no Redis
@@ -322,7 +307,6 @@ def armazenar_embeddings_redis(redis_client, embeddings, textos):
 
 
 
-
 def buscar_embeddings_redis(redis_client, embeddings, user_input, k=3):
     try:
         query_vector = embeddings.embed_query(user_input)
@@ -346,10 +330,6 @@ def buscar_embeddings_redis(redis_client, embeddings, user_input, k=3):
     except Exception as e:
         print(f"Erro ao buscar embeddings no Redis: {e}")
         return None
-
-
-
-
 
 
 # Main com integração do CrewAI e Redis
@@ -466,8 +446,6 @@ def main():
                     resposta = "Desculpe, não consegui encontrar a resposta no momento."
                     st.session_state["messages"].append({"role": "assistant", "content": resposta})
                     st.chat_message("assistant").write(resposta)
-
-
 
 
 if __name__ == "__main__":
