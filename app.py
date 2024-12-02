@@ -90,8 +90,8 @@ def configurar_agente_sql(chat_history=None):
             elif msg["role"] == "assistant":
                 memory.chat_memory.add_ai_message(msg["content"])
 
-    class Graph(BaseModel):
-        option_graph: bool = Field(description='A palavra "gráfico" foi citada na pergunta atual do usuário?')
+    #class Graph(BaseModel):
+        #option_graph: bool = Field(description='A palavra "gráfico" foi está presente na pergunta atual do usuário?')
 
         
 
@@ -209,10 +209,10 @@ def configurar_agente_sql(chat_history=None):
     Caso ocorra uma pergunta que não tenha relação com as tabelas daily_report e project do banco de dados vinculado a você, com exceção de saudações, responda com seus conhecimentos gerais e ao fim diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. 
     Se você encontrar a resposta no banco de dados, responda apenas a pergunta de elaborada, sem lembrar sua função no final.
     A consulta SQL deve incluir as tabelas relevantes. Se ambas forem necessárias, a query deve ser um JOIN entre 'daily_report' e 'project'.
-    O objeto Pydantic deve conter o campo `option_graph` definido como `True` ou `False`, dependendo da presença da palavra "gráfico" na pergunta do usuário.
+    O objeto pydantic deve conter o campo `option_graph` definido como `True` ou `False`, dependendo da presença da palavra "gráfico" na pergunta do usuário.
     Responda à pergunta de forma apropriada, seguindo as diretrizes acima.""",
     agent=sql_developer_agent,
-    output_pydantic=Graph
+    #output_pydantic=Graph
 )
 
     crew = Crew(
@@ -362,7 +362,6 @@ def main():
     if "messages" not in st.session_state:
         st.session_state["messages"] = [{"role": "assistant", "content": "Olá! Como posso ajudar você hoje?"}]
 
-
     # Exibir todas as mensagens do histórico na conversa
     for msg in st.session_state["messages"]:
         if msg["role"] == "user":
@@ -374,7 +373,7 @@ def main():
     criar_indice_redis(redis_client)
 
     embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY, model="text-embedding-ada-002")
-    
+
     # Verificar se embeddings estão carregados no Redis
     if redis_client.exists("emb:0") == 0:
         textos = carregar_dados_postgresql()
@@ -386,6 +385,12 @@ def main():
     if user_input:
         st.session_state["messages"].append({"role": "user", "content": user_input})
         st.chat_message("user").write(user_input)
+
+        # Detecção direta da palavra "gráfico" na entrada do usuário
+        if "gráfico" in user_input.lower():
+            graph_condition = True
+        else:
+            graph_condition = False
 
         # Busca no Redis com histórico
         results = buscar_embeddings_redis(redis_client, embeddings, user_input)
@@ -400,7 +405,7 @@ def main():
         else:
             # Mensagem de depuração apenas no console, não no chat
             print("Nenhum resultado encontrado no Redis. Tentando buscar no banco de dados...")
-            
+
             try:
                 # Tentando buscar no banco de dados usando o agente
                 crew = configurar_agente_sql(chat_history=st.session_state["messages"])
@@ -409,14 +414,13 @@ def main():
             except Exception as e:
                 print(f"Erro ao executar o agente: {e}")
                 result = None  # Garantir que result seja None caso ocorra erro
-            graph_condition = result.get("pydantic")
-            print(f"Option_graph retornado pelo agente: {graph_condition.option_graph}")
-            print(f"Raciocínio do agente: {result.get('thought')}")
-            if graph_condition.option_graph == True:
+
+            if graph_condition:
+                # Geração do gráfico
                 graph_agent = Agent(
                     role='Postgres analyst senior',
-                    goal="Sua função é fazer um gráfico por meio de código e retorna-lo",
-                    backstory ="""Você é um programador especialista em matplotlib e plotar gráficos por código em geral""",
+                    goal="Sua função é fazer um gráfico por meio de código e retorná-lo",
+                    backstory="""Você é um programador especialista em matplotlib e plotar gráficos por código em geral""",
                     code_execution_mode="unsafe",
                     allow_code_execution=True,
                     allow_delegation=False,
@@ -438,30 +442,31 @@ def main():
                     tasks=[graph_agent_task],
                     verbose=True
                 )
-                graph_result = graph_crew.kickoff(inputs = {'infos': result.get('raw')})
+                graph_result = graph_crew.kickoff(inputs={'infos': result.get('raw')})
 
-                # Verifique se result foi definido e não é None antes de tentar acessar
+                # Verifique se graph_result foi definido e não é None antes de tentar acessar
                 if graph_result is not None:
                     imagem_caminho = 'graph.png'
                     st.session_state.messages.append({"role": "assistant", "content": f"Imagem: {imagem_caminho}"})
                     # Exibe a imagem como resposta
                     st.chat_message("assistant").image(imagem_caminho, caption="Aqui está a imagem solicitada!")
                 else:
-                # Mensagem de erro clara somente para o usuário
-                    resposta = "Desculpe, não consegui encontrar a resposta no momento."
+                    # Mensagem de erro clara somente para o usuário
+                    resposta = "Desculpe, não consegui gerar o gráfico no momento."
                     st.session_state["messages"].append({"role": "assistant", "content": resposta})
                     st.chat_message("assistant").write(resposta)
             else:
                 # Verifique se result foi definido e não é None antes de tentar acessar
                 if result is not None:
                     resposta = result.get("raw")
-                    st.session_state.messages.append({"role": "assistant", "content": resposta})
+                    st.session_state["messages"].append({"role": "assistant", "content": resposta})
                     st.chat_message("assistant").write(resposta)
                 else:
                     # Mensagem de erro clara somente para o usuário
                     resposta = "Desculpe, não consegui encontrar a resposta no momento."
                     st.session_state["messages"].append({"role": "assistant", "content": resposta})
                     st.chat_message("assistant").write(resposta)
+
 
 
 
