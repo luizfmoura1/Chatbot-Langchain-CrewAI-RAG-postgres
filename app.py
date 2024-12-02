@@ -91,7 +91,8 @@ def configurar_agente_sql(chat_history=None):
                 memory.chat_memory.add_ai_message(msg["content"])
 
     class Graph(BaseModel):
-        option_graph: bool = Field(description = 'O usuário citou a palavra "gráfico" na pergunta')
+        option_graph: bool = Field(description='A palavra "gráfico" foi citada na pergunta atual do usuário?')
+
         
 
     sql_developer_agent = Agent(
@@ -172,32 +173,44 @@ def configurar_agente_sql(chat_history=None):
     """Responda à pergunta do usuário ({question}) com base nos dados disponíveis nas tabelas 'daily_report' e 'project', utilizando o contexto da conversa anterior ({chat_history}), se aplicável. Siga estas diretrizes:
     Utilize a relação entre 'daily_report.project_id' e 'project.id' para criar consultas combinadas quando necessário.
     Caso a pergunta não mencione explicitamente as tabelas, inferir com base nas colunas mencionadas.
+    
     1. **Consultas ao banco de dados**:
     - Realize uma query apenas se for necessário para responder à pergunta.
     - Utilize as ferramentas disponíveis (run_query) seguindo o formato padrão:
         - Thought: Explique o raciocínio.
         - Action: Nome da ferramenta.
         - Action Input: Entrada no formato JSON.
-    - Sempre considere as colunas da tabela daily_report ao construir consultas.
+    - Sempre considere as colunas das tabelas daily_report e project ao construir consultas.
 
     2. **Perguntas fora do tema do banco**:
     - Se a pergunta não estiver relacionada ao banco de dados, responda com seu conhecimento geral.
     - Não utilize ferramentas para perguntas não relacionadas as tabelas daily_report e project.
+    - Não utilize a ferramenta de gerar gráficos quando a palavra "gráfico" não estiver presente na pergunta do usuário.
 
     3. **Saudações e perguntas gerais**:
     - Não use ferramentas para responder saudações ou perguntas genéricas.
 
     4. **Memória e contexto**:
-    - Utilize o histórico da conversa para formular respostas contextuais e coerentes.
+    - Utilize o histórico da conversa para contexto, mas não para a detecção da palavra "gráfico".
+
+    5. **Detecção da palavra "gráfico"**:
+    - Verifique se a palavra "gráfico" está presente **apenas na pergunta atual do usuário ({question})**, sem considerar o histórico.
+    - Defina `option_graph` como `True` somente se a palavra "gráfico" estiver presente na pergunta atual.
+    - Caso contrário, defina `option_graph` como `False`.
+
+    6. **Respostas**:
+    - Se `option_graph` for `False`, responda à pergunta utilizando dados do banco, mas não gere gráficos.
+    - Se `option_graph` for `True`, indique que um gráfico será gerado e siga o fluxo apropriado.
 
     Seu objetivo é fornecer respostas precisas, claras e úteis, priorizando o uso do banco de dados apenas quando necessário.
-    Caso a pergunta envolva a palavra gráfico, faça uma resposta utilizando os dados encontrados pela query, como se você estivesse montando um gráfico com esses dados, sugira também o tipo de gráfico que você prefere na situação.
+    Caso a pergunta **contenha explicitamente** a palavra "gráfico", faça uma resposta utilizando os dados encontrados pela query, como se você estivesse montando um gráfico com esses dados, sugira também o tipo de gráfico que você prefere na situação.
     """,
     expected_output="""Caso a pergunta seja referente ao banco, preciso de uma resposta que apresente todos os dados obtidos pela query formulando a resposta a partir deles. 
     Caso ocorra uma pergunta que não tenha relação com as tabelas daily_report e project do banco de dados vinculado a você, com exceção de saudações, responda com seus conhecimentos gerais e ao fim diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. 
-    Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final.
+    Se você encontrar a resposta no banco de dados, responda apenas a pergunta de elaborada, sem lembrar sua função no final.
     A consulta SQL deve incluir as tabelas relevantes. Se ambas forem necessárias, a query deve ser um JOIN entre 'daily_report' e 'project'.
-    A palavra "gráfico" deve estar na pergunta, e se estiver, responda o pydantic com True ou False""",
+    O objeto Pydantic deve conter o campo `option_graph` definido como `True` ou `False`, dependendo da presença da palavra "gráfico" na pergunta do usuário.
+    Responda à pergunta de forma apropriada, seguindo as diretrizes acima.""",
     agent=sql_developer_agent,
     output_pydantic=Graph
 )
@@ -397,6 +410,8 @@ def main():
                 print(f"Erro ao executar o agente: {e}")
                 result = None  # Garantir que result seja None caso ocorra erro
             graph_condition = result.get("pydantic")
+            print(f"Option_graph retornado pelo agente: {graph_condition.option_graph}")
+            print(f"Raciocínio do agente: {result.get('thought')}")
             if graph_condition.option_graph == True:
                 graph_agent = Agent(
                     role='Postgres analyst senior',
