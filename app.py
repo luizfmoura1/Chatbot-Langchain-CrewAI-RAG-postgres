@@ -171,6 +171,7 @@ def configurar_agente_sql(chat_history=None):
     description=
     """Responda à pergunta do usuário ({question}) com base nos dados disponíveis nas tabelas 'daily_report' e 'project', utilizando o contexto da conversa anterior ({chat_history}), se aplicável. Siga estas diretrizes:
     Utilize a relação entre 'daily_report.project_id' e 'project.id' para criar consultas combinadas quando necessário.
+    Caso a pergunta não mencione explicitamente as tabelas, inferir com base nas colunas mencionadas.
     1. **Consultas ao banco de dados**:
     - Realize uma query apenas se for necessário para responder à pergunta.
     - Utilize as ferramentas disponíveis (run_query) seguindo o formato padrão:
@@ -195,6 +196,7 @@ def configurar_agente_sql(chat_history=None):
     expected_output="""Caso a pergunta seja referente ao banco, preciso de uma resposta que apresente todos os dados obtidos pela query formulando a resposta a partir deles. 
     Caso ocorra uma pergunta que não tenha relação com as tabelas daily_report e project do banco de dados vinculado a você, com exceção de saudações, responda com seus conhecimentos gerais e ao fim diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. 
     Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final.
+    A consulta SQL deve incluir as tabelas relevantes. Se ambas forem necessárias, a query deve ser um JOIN entre 'daily_report' e 'project'.
     A palavra "gráfico" deve estar na pergunta, e se estiver, responda o pydantic com True ou False""",
     agent=sql_developer_agent,
     output_pydantic=Graph
