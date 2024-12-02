@@ -35,42 +35,29 @@ def conectar_postgresql():
         st.error(f"Erro ao conectar ao PostgreSQL: {e}")
         st.stop()
 
-# Função para obter o esquema da tabela "actor"
-def get_daily_report_schema():
+def get_table_schema(table_name):
+    """Obtém o esquema (colunas) de uma tabela específica no PostgreSQL."""
     connection = conectar_postgresql()
     cursor = connection.cursor()
-    cursor.execute("""
-        SELECT EXISTS (
-            SELECT 1 FROM information_schema.tables
-            WHERE table_name = 'daily_report' AND table_schema = 'tenant_aperam'
-        )
-    """)
-    exists = cursor.fetchone()[0]
-    if not exists:
-        raise Exception("Tabela 'daily_report' não encontrada no esquema 'tenant_aperam'.")
-    
-    cursor.execute("""
+    cursor.execute(f"""
         SELECT column_name
         FROM information_schema.columns
-        WHERE table_name = 'daily_report' AND table_schema = 'tenant_aperam'
+        WHERE table_name = '{table_name}' AND table_schema = 'tenant_aperam'
     """)
     columns = cursor.fetchall()
     cursor.close()
     connection.close()
-    return ", ".join([column[0] for column in columns])
+    return [column[0] for column in columns]
 
 
-# Função de execução de consulta para o agente SQL com depuração
-@tool("Execute query DB tool")
-def run_query(query: str):
-    """Execute a query no banco de dados e retorne os dados."""
+@tool("Execute multi-table query")
+def run_query_multi_table(query: str):
+    """Executa uma query SQL envolvendo múltiplas tabelas."""
     connection = conectar_postgresql()
     cursor = connection.cursor()
-    print(query)
-
+    print(f"Executing query: {query}")
     cursor.execute(query)
     result = cursor.fetchall()
-    print("Resultado da query:", result)  # Exibe o resultado da query para depuração
     cursor.close()
     connection.close()
     return result
@@ -78,8 +65,10 @@ def run_query(query: str):
 
 
 
+
 def configurar_agente_sql(chat_history=None):
-    daily_report_schema_info = get_daily_report_schema()
+    daily_report_schema_info = get_table_schema("daily_report")
+    project_schema_info = get_table_schema("project")
 
     llm = ChatOpenAI(
         openai_api_key=OPENAI_API_KEY,
@@ -107,9 +96,12 @@ def configurar_agente_sql(chat_history=None):
 
     sql_developer_agent = Agent(
         role='Postgres analyst senior',
-        goal="Sua função é fazer query no banco de dados referente a dados encontrados na table daily_report, quando necessário, de acordo com o pedido do usuário. E se for requisitado, você deve gerar umgráfico baseados nos dados obtidos pela query.",
+        goal=f"""Responder perguntas relacionadas às tabelas 'daily_report' e 'project'. 
+        Você deve usar queries SQL para extrair dados dessas tabelas e combiná-los, caso necessário.
+        As tabelas são relacionadas pela coluna 'project_id' na tabela 'daily_report' e a coluna 'id' na tabela 'project'.
+        """,
         backstory = f"""
-        Você é um analista experiente conectado a um banco de dados que contém a tabela 'tenant_aperam.daily_report' e a "tenant_aperam.project", com as seguintes colunas: {daily_report_schema_info}.
+        Você é um analista experiente conectado a um banco de dados que contém a tabela 'tenant_aperam.daily_report' e a "tenant_aperam.project", com as seguintes colunas: {daily_report_schema_info, project_schema_info}.
         Seu objetivo é responder perguntas relacionadas a essas tabelas e fornecer informações claras e precisas. Utilize as ferramentas disponíveis para realizar consultas e gerar gráficos, seguindo estas diretrizes:
 
         1. Tema principal da tabela tenant_aperam.daily_report:
@@ -169,7 +161,7 @@ def configurar_agente_sql(chat_history=None):
         Seu papel é ser eficiente, preciso e fornecer respostas claras, priorizando consultas no banco de dados relacionadas à tabela 'tenant_aperam.daily_report'.
         """,
 
-        tools=[run_query,],
+        tools=[run_query_multi_table],
         allow_delegation=False,
         verbose=True,
         memory=memory,
@@ -177,8 +169,8 @@ def configurar_agente_sql(chat_history=None):
 
     sql_developer_task = Task(
     description=
-    """Responda à pergunta do usuário ({question}) com base no tema principal do banco de dados, utilizando o contexto da conversa anterior ({chat_history}), se aplicável. Siga estas diretrizes:
-
+    """Responda à pergunta do usuário ({question}) com base nos dados disponíveis nas tabelas 'daily_report' e 'project', utilizando o contexto da conversa anterior ({chat_history}), se aplicável. Siga estas diretrizes:
+    Utilize a relação entre 'daily_report.project_id' e 'project.id' para criar consultas combinadas quando necessário.
     1. **Consultas ao banco de dados**:
     - Realize uma query apenas se for necessário para responder à pergunta.
     - Utilize as ferramentas disponíveis (run_query) seguindo o formato padrão:
@@ -189,7 +181,7 @@ def configurar_agente_sql(chat_history=None):
 
     2. **Perguntas fora do tema do banco**:
     - Se a pergunta não estiver relacionada ao banco de dados, responda com seu conhecimento geral.
-    - Não utilize ferramentas para perguntas não relacionadas à tabela daily_report.
+    - Não utilize ferramentas para perguntas não relacionadas as tabelas daily_report e project.
 
     3. **Saudações e perguntas gerais**:
     - Não use ferramentas para responder saudações ou perguntas genéricas.
@@ -201,7 +193,7 @@ def configurar_agente_sql(chat_history=None):
     Caso a pergunta envolva a palavra gráfico, faça uma resposta utilizando os dados encontrados pela query, como se você estivesse montando um gráfico com esses dados, sugira também o tipo de gráfico que você prefere na situação.
     """,
     expected_output="""Caso a pergunta seja referente ao banco, preciso de uma resposta que apresente todos os dados obtidos pela query formulando a resposta a partir deles. 
-    Caso ocorra uma pergunta que não tenha relação com a table daily_report do banco de dados vinculado a você, com exceção de saudações, responda com seus conhecimentos gerais e ao fim diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. 
+    Caso ocorra uma pergunta que não tenha relação com as tabelas daily_report e project do banco de dados vinculado a você, com exceção de saudações, responda com seus conhecimentos gerais e ao fim diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. 
     Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final.
     A palavra "gráfico" deve estar na pergunta, e se estiver, responda o pydantic com True ou False""",
     agent=sql_developer_agent,
