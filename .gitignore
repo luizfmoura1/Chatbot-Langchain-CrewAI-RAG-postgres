@@ -1,3 +1,6 @@
 venv/
 .env
 *.pyc
+graph.png
+teste.py
+teste2.py

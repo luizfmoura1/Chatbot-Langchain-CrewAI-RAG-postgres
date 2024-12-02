@@ -102,17 +102,17 @@ def configurar_agente_sql(chat_history=None):
                 memory.chat_memory.add_ai_message(msg["content"])
 
     class Graph(BaseModel):
-        option_graph: bool = Field(description = 'O usuário citou a palavra gráfico na pergunta')
+        option_graph: bool = Field(description = 'O usuário citou a palavra "gráfico" na pergunta')
         
 
     sql_developer_agent = Agent(
         role='Postgres analyst senior',
         goal="Sua função é fazer query no banco de dados referente a dados encontrados na table daily_report, quando necessário, de acordo com o pedido do usuário. E se for requisitado, você deve gerar umgráfico baseados nos dados obtidos pela query.",
         backstory = f"""
-        Você é um analista experiente conectado a um banco de dados que contém a tabela 'tenant_aperam.daily_report', com as seguintes colunas: {daily_report_schema_info}.
-        Seu objetivo é responder perguntas relacionadas a essa tabela e fornecer informações claras e precisas. Utilize as ferramentas disponíveis para realizar consultas e gerar gráficos, seguindo estas diretrizes:
+        Você é um analista experiente conectado a um banco de dados que contém a tabela 'tenant_aperam.daily_report' e a "tenant_aperam.project", com as seguintes colunas: {daily_report_schema_info}.
+        Seu objetivo é responder perguntas relacionadas a essas tabelas e fornecer informações claras e precisas. Utilize as ferramentas disponíveis para realizar consultas e gerar gráficos, seguindo estas diretrizes:
 
-        1. Tema principal do banco:
+        1. Tema principal da tabela tenant_aperam.daily_report:
         - Relatórios diários de obra, com as seguintes colunas:
             - ID do relatório (column id)
             - Data de execução (column executed_at)
@@ -133,24 +133,37 @@ def configurar_agente_sql(chat_history=None):
             - in_review = em análise
             - in_approver = em aberto
 
-        2. Respostas baseadas no banco de dados:
+        2. Tema da tabela tenant_aperam.project:
+            - ID da obra (column id)
+            - Data de execução (column executed_at)
+            - Data de início (column start_at)
+            - Data de finalização (end_at)
+            - status da obra (column status)
+            - Nome da obra (column name)
+            - Código do contrato (column contract_code)
+            - Nome do centro de custo/empresa respnsável (column cost_center_name)
+            - Data de importação (column _import_at)
+            - open = aberto
+            - closed = fechado
+
+        3. Respostas baseadas no banco de dados:
         - Utilize ferramentas para consultas ou geração de gráficos somente quando necessário.
         - Ao usar ferramentas, siga rigorosamente este formato:
             - Thought: Explique seu raciocínio.
             - Action: Nome da ferramenta (run_query ou generate_graph).
             - Action Input: Dados no formato JSON.
 
-        3. Perguntas fora do escopo do banco:
+        4. Perguntas fora do escopo do banco:
         - Responda com seu conhecimento geral, sem mencionar a tabela diretamente.
         - Sempre relembre a função principal: responder perguntas sobre relatórios diários de obra.
 
-        4. Uso de ferramentas:
+        5. Uso de ferramentas:
         - Nunca reutilize uma ferramenta já utilizada na mesma interação.
         - Se não precisar de ferramentas, forneça uma resposta final no formato:
             - Thought: Resuma seu raciocínio.
             - Final Answer: Resposta clara e completa.
 
-        5. Contexto da conversa:
+        6. Contexto da conversa:
         - Lembre-se de perguntas anteriores para oferecer respostas contextualizadas e coerentes.
 
         Seu papel é ser eficiente, preciso e fornecer respostas claras, priorizando consultas no banco de dados relacionadas à tabela 'tenant_aperam.daily_report'.
@@ -190,7 +203,7 @@ def configurar_agente_sql(chat_history=None):
     expected_output="""Caso a pergunta seja referente ao banco, preciso de uma resposta que apresente todos os dados obtidos pela query formulando a resposta a partir deles. 
     Caso ocorra uma pergunta que não tenha relação com a table daily_report do banco de dados vinculado a você, com exceção de saudações, responda com seus conhecimentos gerais e ao fim diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. 
     Se você encontrar a resposta no banco de dados, responda apenas a pergunta de forma um pouco elaborada, sem lembrar sua função no final.
-    Caso tenha a palavra gráfico na pergunta, responda o pydantic com True ou False""",
+    A palavra "gráfico" deve estar na pergunta, e se estiver, responda o pydantic com True ou False""",
     agent=sql_developer_agent,
     output_pydantic=Graph
 )
@@ -405,7 +418,7 @@ def main():
                     description=
                     """Sua tarefa é fazer um gráfico utilizando code e matplotlib para as informações a seguir:
                     {infos}
-                    Quero que as informações do gráfico sejam em português-BR, e o dpi da imagem deve ser 50dpi.
+                    Quero que as informações do gráfico sejam em português-BR, e o dpi da imagem deve ser 90dpi.
                     E neste código salve o gráfico como png no caminho graph.png e retorne um valor booleano informando se o gráfico foi salvo ou não como resposta final da sua execução.""",
                     expected_output="""É esperado um gráfico com as informações solicitadas, e um valor booleano sinalizando como foi a execução do código.""",
                     agent=graph_agent,
