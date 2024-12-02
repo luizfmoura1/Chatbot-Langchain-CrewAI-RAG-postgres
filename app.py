@@ -113,9 +113,9 @@ def configurar_agente_sql(chat_history=None):
             - Data de assinatura do empreiteiro (column builder_signed_at)
             - Quantidade de revisões (column revision_number)
             - Data de importação (column _import_at)
-            - approved = aprovado
-            - in_review = em análise
-            - in_approver = em aberto
+            - 'approved' = aprovado
+            - 'in_review' = em análise
+            - 'in_approver' = em aberto
 
         2. Tema da tabela tenant_aperam.project:
             - ID da obra (column id)
