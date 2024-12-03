@@ -367,7 +367,7 @@ def main():
         st.chat_message("user").write(user_input)
 
         # Detecção direta da palavra "gráfico" na entrada do usuário
-        if "gráfico" in user_input.lower():
+        if "gráfico" in user_input.lower() or "grafico" in user_input.lower():
             graph_condition = True
         else:
             graph_condition = False
