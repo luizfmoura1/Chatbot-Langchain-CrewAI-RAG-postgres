@@ -396,45 +396,63 @@ def main():
                 result = None  # Garantir que result seja None caso ocorra erro
 
             if graph_condition:
-                # Geração do gráfico
-                graph_agent = Agent(
-                    role='Postgres analyst senior',
-                    goal="Sua função é fazer um gráfico por meio de código e retorná-lo",
-                    backstory="""Você é um programador especialista em matplotlib e plotar gráficos por código em geral""",
-                    code_execution_mode="unsafe",
-                    allow_code_execution=True,
-                    allow_delegation=False,
-                    verbose=True,
-                )
+                # Configurando o número máximo de iterações
+                max_iter = 5
+                contador_iteracoes = 0
+                grafico_gerado = False
 
-                graph_agent_task = Task(
-                    description=
-                    """Sua tarefa é fazer um gráfico utilizando code e matplotlib para as informações a seguir:
-                    {infos}
-                    Quero que as informações do gráfico sejam em português-BR, e o dpi da imagem deve ser 90dpi.
-                    E neste código salve o gráfico como png no caminho graph.png e retorne um valor booleano informando se o gráfico foi salvo ou não como resposta final da sua execução.""",
-                    expected_output="""É esperado um gráfico com as informações solicitadas, e um valor booleano sinalizando como foi a execução do código.""",
-                    agent=graph_agent,
-                )
+                try:
+                    # Configurar o agente de gráficos
+                    graph_agent = Agent(
+                        role='Graph generator',
+                        goal="Sua função é fazer um gráfico por meio de código e retorná-lo",
+                        backstory="""Você é um programador especialista em matplotlib e plotar gráficos por código em geral""",
+                        code_execution_mode="unsafe",
+                        allow_code_execution=True,
+                        allow_delegation=False,
+                        verbose=True,
+                    )
 
-                graph_crew = Crew(
-                    agents=[graph_agent],
-                    tasks=[graph_agent_task],
-                    verbose=True
-                )
-                graph_result = graph_crew.kickoff(inputs={'infos': result.get('raw')})
+                    graph_agent_task = Task(
+                        description=
+                        """Sua tarefa é fazer um gráfico utilizando code e matplotlib para as informações a seguir:
+                        {infos}
+                        Quero que as informações do gráfico sejam em português-BR, e o dpi da imagem deve ser 90dpi.
+                        E neste código salve o gráfico como png no caminho graph.png e retorne um valor booleano informando se o gráfico foi salvo ou não como resposta final da sua execução.""",
+                        expected_output="""É esperado um gráfico com as informações solicitadas, e um valor booleano sinalizando como foi a execução do código.""",
+                        agent=graph_agent,
+                    )
 
-                # Verifique se graph_result foi definido e não é None antes de tentar acessar
-                if graph_result is not None:
-                    imagem_caminho = 'graph.png'
-                    st.session_state.messages.append({"role": "assistant", "content": f"Imagem: {imagem_caminho}"})
-                    # Exibe a imagem como resposta
-                    st.chat_message("assistant").image(imagem_caminho, caption="Aqui está a imagem solicitada!")
-                else:
-                    # Mensagem de erro clara somente para o usuário
-                    resposta = "Desculpe, não consegui gerar o gráfico no momento."
+                    graph_crew = Crew(
+                        agents=[graph_agent],
+                        tasks=[graph_agent_task],
+                        verbose=True
+                    )
+
+                    # Loop para tentar gerar o gráfico até max_iter vezes
+                    while not grafico_gerado and contador_iteracoes < max_iter:
+                        contador_iteracoes += 1
+                        print(f"Tentativa {contador_iteracoes} de gerar gráfico...")
+
+                        # Executar o agente para gerar o gráfico
+                        graph_result = graph_crew.kickoff(inputs={'infos': result.get('raw')})
+
+                        if graph_result is not None and os.path.exists('graph.png'):
+                            grafico_gerado = True
+                            st.session_state.messages.append({"role": "assistant", "content": "Gráfico gerado com sucesso!"})
+                            st.chat_message("assistant").image('graph.png', caption="Aqui está a imagem solicitada!")
+                        else:
+                            print(f"Tentativa {contador_iteracoes} falhou. Gráfico não gerado.")
+
+                except Exception as e:
+                    print(f"Erro ao tentar gerar gráfico: {e}")
+
+                # Caso o número máximo de iterações seja atingido sem sucesso
+                if not grafico_gerado:
+                    resposta = "Desculpe, não consegui gerar o gráfico após múltiplas tentativas."
                     st.session_state["messages"].append({"role": "assistant", "content": resposta})
                     st.chat_message("assistant").write(resposta)
+
             else:
                 # Verifique se result foi definido e não é None antes de tentar acessar
                 if result is not None:
@@ -446,6 +464,8 @@ def main():
                     resposta = "Desculpe, não consegui encontrar a resposta no momento."
                     st.session_state["messages"].append({"role": "assistant", "content": resposta})
                     st.chat_message("assistant").write(resposta)
+
+
 
 
 if __name__ == "__main__":
