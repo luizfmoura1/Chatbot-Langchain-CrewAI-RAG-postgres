@@ -24,9 +24,9 @@ def conectar_postgresql():
         connection = psycopg2.connect(
             host='localhost',
             database='gerdau',
-            user='gerdau',
-            password='gerdau',
-            port=6432
+            user='luiz',
+            password='CgvQTiyXXEN7xSnsMHBkT5NW2MaxtC',
+            port=5432
         )
         print("Conexão com o PostgreSQL estabelecida com sucesso.")
         return connection
