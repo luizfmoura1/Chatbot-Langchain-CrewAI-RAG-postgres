@@ -1,3 +1,4 @@
+
 import os
 import streamlit as st
 import psycopg2
@@ -41,7 +42,7 @@ def get_table_schema(table_name):
     cursor.execute(f"""
         SELECT column_name
         FROM information_schema.columns
-        WHERE table_name = '{table_name}' AND table_schema = 'tenant_aperam'
+        WHERE table_name = '{table_name}' AND table_schema = 'tenant_gerdau_com_br'
     """)
     columns = cursor.fetchall()
     cursor.close()
@@ -68,9 +69,8 @@ def configurar_agente_sql(chat_history=None):
 
     llm = ChatOpenAI(
         openai_api_key=OPENAI_API_KEY,
-        temperature=0.1,
+        temperature=0.5,
         model_name="gpt-4o-mini",
-        max_tokens=1000
     )
 
     # Inicializar a memória apenas uma vez na sessão
@@ -93,10 +93,10 @@ def configurar_agente_sql(chat_history=None):
         As tabelas são relacionadas pela coluna 'project_id' na tabela 'daily_report' e a coluna 'id' na tabela 'project'.
         """,
         backstory = f"""
-        Você é um analista experiente conectado a um banco de dados que contém a tabela 'tenant_aperam.daily_report' e a "tenant_aperam.project", com as seguintes colunas: {daily_report_schema_info, project_schema_info}.
+        Você é um analista experiente conectado a um banco de dados que contém a tabela 'tenant_gerdau_com_br.daily_report' e a "tenant_gerdau_com_br.project", com as seguintes colunas: {daily_report_schema_info, project_schema_info}.
         Seu objetivo é responder perguntas relacionadas a essas tabelas e fornecer informações claras e precisas. Utilize as ferramentas disponíveis para realizar consultas e gerar gráficos, seguindo estas diretrizes:
 
-        1. Tema principal da tabela tenant_aperam.daily_report:
+        1. Tema principal da tabela tenant_gerdau_com_br.daily_report:
         - Relatórios diários de obra, com as seguintes colunas:
             - ID do relatório (column id)
             - Data de execução (column executed_at)
@@ -117,7 +117,7 @@ def configurar_agente_sql(chat_history=None):
             - 'in_review' = em análise
             - 'in_approver' = em aberto
 
-        2. Tema da tabela tenant_aperam.project:
+        2. Tema da tabela tenant_gerdau_com_br.project:
             - ID da obra (column id)
             - Data de execução (column executed_at)
             - Data de início (column start_at)
@@ -150,13 +150,14 @@ def configurar_agente_sql(chat_history=None):
         6. Contexto da conversa:
         - Lembre-se de perguntas anteriores para oferecer respostas contextualizadas e coerentes.
 
-        Seu papel é ser eficiente, preciso e fornecer respostas claras, priorizando consultas no banco de dados relacionadas à tabela 'tenant_aperam.daily_report'.
+        Seu papel é ser eficiente, preciso e fornecer respostas claras, priorizando consultas no banco de dados relacionadas à tabela 'tenant_gerdau_com_br.daily_report'.
         """,
 
         tools=[run_query_multi_table],
         allow_delegation=False,
         verbose=True,
         memory=memory,
+        llm=llm
     )
 
     sql_developer_task = Task(
@@ -219,7 +220,7 @@ def configurar_agente_sql(chat_history=None):
 def carregar_dados_postgresql():
     connection = conectar_postgresql()
     cursor = connection.cursor()
-    cursor.execute("SELECT * FROM tenant_aperam.daily_report")
+    cursor.execute("SELECT * FROM tenant_gerdau_com_br.daily_report")
     textos = " ".join([" ".join(map(str, row)) for row in cursor.fetchall()])
     cursor.close()
     connection.close()
@@ -338,6 +339,12 @@ def main():
     st.title("OppemBOT 🤖")
     st.caption("🚀 Pergunte para nossa IA especialista da Oppem")
 
+    llm = ChatOpenAI(
+        openai_api_key=OPENAI_API_KEY,
+        temperature=0.5,
+        model_name="gpt-4o-mini",
+    )
+
     # Inicializar mensagens na sessão, se ainda não estiverem configuradas
     if "messages" not in st.session_state:
         st.session_state["messages"] = [{"role": "assistant", "content": "Olá! Como posso ajudar você hoje?"}]
@@ -396,62 +403,62 @@ def main():
                 result = None  # Garantir que result seja None caso ocorra erro
 
             if graph_condition:
-                # Configurando o número máximo de iterações
-                max_iter = 5
-                contador_iteracoes = 0
-                grafico_gerado = False
+                if os.path.exists('graficos/graph.png'):
+                    os.remove('graficos/graph.png')
+                    
+                # Configurar o agente de gráficos
+                graph_agent = Agent(
+                    role='Graph generator',
+                    goal="""Sua função é fazer um gráfico por meio de código e parar a execução quando ele for gerado.
+                    ## **ATENÇÃO**
+                    - Nunca se esqueça de importar a lib os 
+                    - Caso o código retorne **True**, **encerre a task**
+                    - A tool utilizada **deve** esperar um resultado booleano (True ou False)
+                    """,
+                    backstory="""Você é um programador especialista em matplotlib e plotar gráficos por código em geral""",
+                    allow_code_execution=True,
+                    max_execution_time=300,  # 5-minute timeout
+                    max_retry_limit=3, # More retries for complex code tasks
+                    function_calling_llm="gpt-4o",  # Cheaper model for tool calls
+                    verbose=True,
+                    llm=llm
+                )
 
-                try:
-                    # Configurar o agente de gráficos
-                    graph_agent = Agent(
-                        role='Graph generator',
-                        goal="Sua função é fazer um gráfico por meio de código e retorná-lo",
-                        backstory="""Você é um programador especialista em matplotlib e plotar gráficos por código em geral""",
-                        code_execution_mode="unsafe",
-                        allow_code_execution=True,
-                        allow_delegation=False,
-                        verbose=True,
-                    )
+                graph_agent_task = Task(
+                    description=
+                    """Sua tarefa é fazer um gráfico utilizando code e matplotlib para as informações a seguir:
+                    {infos}
+                    -----
+                    Quero que as informações do gráfico sejam em português-BR, e o dpi da imagem deve ser 90dpi.
+                    E neste código salve o gráfico como png no caminho graficos/graph.png e faça uma verificação com esse seguinte código:
+                    
+                    ```python
+                    import os
 
-                    graph_agent_task = Task(
-                        description=
-                        """Sua tarefa é fazer um gráfico utilizando code e matplotlib para as informações a seguir:
-                        {infos}
-                        Quero que as informações do gráfico sejam em português-BR, e o dpi da imagem deve ser 90dpi.
-                        E neste código salve o gráfico como png no caminho graph.png e retorne um valor booleano informando se o gráfico foi salvo ou não como resposta final da sua execução.""",
-                        expected_output="""É esperado um gráfico com as informações solicitadas, e um valor booleano sinalizando como foi a execução do código.""",
-                        agent=graph_agent,
-                    )
+                    if os.path.exists(caminho):
+                        return True
+                    else:
+                        return False
+                    ```
+                    """,
+                    expected_output="""É esperado um gráfico com as informações solicitadas, e um valor booleano sinalizando se o gráfico foi criado no caminho verificado.""",
+                    agent=graph_agent,
+                )
 
-                    graph_crew = Crew(
-                        agents=[graph_agent],
-                        tasks=[graph_agent_task],
-                        verbose=True
-                    )
+                graph_crew = Crew(
+                    agents=[graph_agent],
+                    tasks=[graph_agent_task],
+                    verbose=True
+                )
 
-                    # Loop para tentar gerar o gráfico até max_iter vezes
-                    while not grafico_gerado and contador_iteracoes < max_iter:
-                        contador_iteracoes += 1
-                        print(f"Tentativa {contador_iteracoes} de gerar gráfico...")
 
-                        # Executar o agente para gerar o gráfico
-                        graph_result = graph_crew.kickoff(inputs={'infos': result.get('raw')})
+                # Executar o agente para gerar o gráfico
+                graph_crew.kickoff(inputs={'infos': result.get('raw')})
 
-                        if graph_result is not None and os.path.exists('graph.png'):
-                            grafico_gerado = True
-                            st.session_state.messages.append({"role": "assistant", "content": "Gráfico gerado com sucesso!"})
-                            st.chat_message("assistant").image('graph.png', caption="Aqui está a imagem solicitada!")
-                        else:
-                            print(f"Tentativa {contador_iteracoes} falhou. Gráfico não gerado.")
+                graph_result = os.path.exists('graficos/graph.png')
 
-                except Exception as e:
-                    print(f"Erro ao tentar gerar gráfico: {e}")
-
-                # Caso o número máximo de iterações seja atingido sem sucesso
-                if not grafico_gerado:
-                    resposta = "Desculpe, não consegui gerar o gráfico após múltiplas tentativas."
-                    st.session_state["messages"].append({"role": "assistant", "content": resposta})
-                    st.chat_message("assistant").write(resposta)
+                if graph_result:
+                    st.chat_message("assistant").image('graficos/graph.png', caption="Aqui está a imagem solicitada!")
 
             else:
                 # Verifique se result foi definido e não é None antes de tentar acessar
