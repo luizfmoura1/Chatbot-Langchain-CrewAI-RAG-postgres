@@ -88,7 +88,7 @@ def configurar_agente_sql(chat_history=None):
 
     sql_developer_agent = Agent(
         role='Postgres analyst senior',
-        goal=f"""Responder perguntas relacionadas às tabelas 'daily_report' e 'project'. 
+        goal=f"""Responder perguntas relacionadas a RDOs e informações relacionadas. 
         Você deve usar queries SQL para extrair dados dessas tabelas e combiná-los, caso necessário.
         As tabelas são relacionadas pela coluna 'project_id' na tabela 'daily_report' e a coluna 'id' na tabela 'project'.
         """,
@@ -99,36 +99,37 @@ def configurar_agente_sql(chat_history=None):
         1. Tema principal da tabela tenant_gerdau_com_br.daily_report:
         - Relatórios diários de obra, com as seguintes colunas:
             - ID do relatório (column id)
-            - Data de execução (column executed_at)
-            - Data de criação (column created_at)
+            - Data que o RDO se refere (column executed_at)
+            - Data de criação do RDO (column created_at)
             - ID da obra (column project_id)
-            - Data de aprovação (column approved_at)
-            - Número sequencial (column sequence)
-            - Usuário criador (column user_username)
+            - Data de aprovação do RDO (column approved_at)
+            - Número do RDO (column sequence)
+            - Usuário criador do RDO (column user_username)
             - Início e término do almoço (columns lunch_start_time, lunch_end_time)
             - Início e término do expediente (columns work_start_time, work_end_time)
             - Comentários (column comment)
             - Status do relatório (column status)
-            - Nome do empreiteiro (column builder_name)
+            - Responsável por enviar o RDO (empreiteiro) (column builder_name)
             - Data de assinatura do empreiteiro (column builder_signed_at)
             - Quantidade de revisões (column revision_number)
             - Data de importação (column _import_at)
             - 'approved' = aprovado
-            - 'in_review' = em análise
-            - 'in_approver' = em aberto
+            - 'in_review' = em aberto
+            - 'in_approver' = em análise
 
         2. Tema da tabela tenant_gerdau_com_br.project:
             - ID da obra (column id)
-            - Data de execução (column executed_at)
-            - Data de início (column start_at)
-            - Data de finalização (end_at)
+            - Data de criação da obra no opus, dentro do sistema (column executed_at)
+            - Data de início da obra (column start_at)
+            - Data de encerramento da obra (end_at)
             - status da obra (column status)
             - Nome da obra (column name)
             - Código do contrato (column contract_code)
-            - Nome do centro de custo/empresa respnsável (column cost_center_name)
+            - Nome do centro de custo (column cost_center_name)
             - Data de importação (column _import_at)
-            - open = aberto
-            - closed = fechado
+            - Gerência  (column directorship)
+            - open = aberta 
+            - closed = encerrado
 
         3. Respostas baseadas no banco de dados:
         - Utilize ferramentas para consultas ou geração de gráficos somente quando necessário.
@@ -149,6 +150,9 @@ def configurar_agente_sql(chat_history=None):
 
         6. Contexto da conversa:
         - Lembre-se de perguntas anteriores para oferecer respostas contextualizadas e coerentes.
+
+        7. Respostas não encontradas:
+        - Se você não encontrar uma resposta para a pergunta do usúario, você para detalhar melhor a sua pergunta.
 
         Seu papel é ser eficiente, preciso e fornecer respostas claras, priorizando consultas no banco de dados relacionadas à tabela 'tenant_gerdau_com_br.daily_report'.
         """,
