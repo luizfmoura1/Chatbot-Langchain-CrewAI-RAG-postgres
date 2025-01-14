@@ -66,6 +66,14 @@ def run_query_multi_table(query: str):
 def configurar_agente_sql(chat_history=None):
     daily_report_schema_info = get_table_schema("daily_report")
     project_schema_info = get_table_schema("project")
+    calculation_memory_schema_info = get_table_schema("calculation_memory")
+    area_schema_info = get_table_schema("area")
+    cart_schema_info = get_table_schema("cart")
+    daily_report_occurrency_schema_info = get_table_schema("daily_report,occurrency")
+    daily_report_activity_schema_info = get_table_schema("daily_report_activity")
+    daily_report_equipment_schema_info = get_table_schema("daily_report_equipment")
+
+    
 
     llm = ChatOpenAI(
         openai_api_key=OPENAI_API_KEY,
@@ -93,12 +101,7 @@ def configurar_agente_sql(chat_history=None):
         Todas as tabelas são relacionadas pela coluna 'project_id' exceto na table 'project' que ao invés de ser 'project_id' nessa tabela é apenas 'id'.
         """,
         backstory = f"""
-        Você é um analista experiente conectado a um banco de dados que contém as tabelas 'tenant_gerdau_com_br.daily_report', "tenant_gerdau_com_br.project", 'tenant_gerdau_com_br.area', 'tenant_gerdau_com_br.calculation_memory' e 'tenant_gerdau_com_br.cart'.
-
-        **ATENÇÃO** a table calculation_memory fala sobre memória de calculo
-         
-          
-            com as seguintes colunas: {daily_report_schema_info, project_schema_info}.
+        Você é um analista experiente conectado a um banco que contém as seguintes tabelas: {daily_report_schema_info, project_schema_info, calculation_memory_schema_info, area_schema_info, daily_report_occurrency_schema_info, cart_schema_info, daily_report_activity_schema_info, daily_report_equipment_schema_info}
         Seu objetivo é responder perguntas relacionadas a essas tabelas e fornecer informações claras e precisas. Utilize as ferramentas disponíveis para realizar consultas e gerar gráficos, seguindo estas diretrizes:
 
         1. Tema principal da tabela tenant_gerdau_com_br.daily_report:
@@ -118,9 +121,14 @@ def configurar_agente_sql(chat_history=None):
             - Data de assinatura do empreiteiro (column builder_signed_at)
             - Quantidade de revisões (column revision_number)
             - Data de importação (column _import_at)
+            - Estado do RDO (ativo ou excluido), (column is_active)
+            - Data do excluimento do RDO (column deleted_at)
+            - Usuário responsável por excluir o RDO (column user_deleted)
             - 'approved' = aprovado
             - 'in_review' = em aberto
             - 'in_approver' = em análise
+
+            - **ATENÇÃO** a column 'is_active' separa os RDOs ativos e excluidos, você **DEVE SEMPRE** ignorar em todas as suas consultas nessa table os RDOs que estejam com status 'false'
 
         2. Tema da tabela tenant_gerdau_com_br.project:
             - ID da obra (column id)
@@ -135,6 +143,34 @@ def configurar_agente_sql(chat_history=None):
             - Gerência  (column directorship)
             - open = aberta 
             - closed = encerrado
+
+        3. Tema principal da tabela tenant_gerdau_com_br.daily_report_equipment:
+            - ID do equipamento (column id)
+            - ID do RDO vinculado ao equipamento (column daily_report_id)
+            - Index (column index)
+            - ID da obra (column project_id)
+            - ID do equipamento (equipment_id)
+            - Quantidade do equipamento (column equipment_quantity)
+            - Quantidade de equipamento relacionado ao empreiteiro (column equipment_builder_quantity)
+            - Quantidade de equipamento relacionado ao fiscal (column equipment_auditor_quantity)
+        
+        4. Tema principal da tabela tenant_gerdau_com_br.calculation_memory:
+            - ID da memória de cálculo (column id)
+            - ID do projeto vinculado a memória de cálculo (column project_id)
+            - ID do periodo vinculado a memória de cálculo (column period_id)
+            - (column meansurement_report_id)
+            - Data de referência de memória de cálculo (column reference_date)
+            - Status da memória de cálculo (status)
+            - (column resource_id)
+            - Quantidade física (column physical_quantity)
+            - Valor financeiro da memória de calculo (column finantial_value)
+            - Valor unitário da memória de cálculo (column unit_value)
+            - (column tag_id)
+            - Fiscal responsável pela memória de cálculo (column user_username)
+            - ID do empreiteiro responsável por assinar a memória de cálculo (column signed_builder_user_id)
+            - ID do fiscal responsável por assinar a memória de cálculo (column signed_auditor_user_id)
+            - Número da ordem da memórida de cálculo (column order_number)
+            - **Atenção sempre que o valor vincular for 'None' ou 'null', significa que não há valores vinculados, então você deve considerar como 0.
 
         3. Respostas baseadas no banco de dados:
         - Utilize ferramentas para consultas ou geração de gráficos somente quando necessário.
@@ -172,7 +208,7 @@ def configurar_agente_sql(chat_history=None):
     sql_developer_task = Task(
     description=
     """Responda à pergunta do usuário ({question}) com base nos dados disponíveis nas tabelas 'daily_report' e 'project', utilizando o contexto da conversa anterior ({chat_history}), se aplicável. Siga estas diretrizes:
-    Utilize a relação entre 'daily_report.project_id' e 'project.id' para criar consultas combinadas quando necessário.
+    Utilize a relação entre as tabelas para criar consultas combinadas quando necessário.
     Caso a pergunta não mencione explicitamente as tabelas, inferir com base nas colunas mencionadas.
     
     1. **Consultas ao banco de dados**:
@@ -209,7 +245,7 @@ def configurar_agente_sql(chat_history=None):
     expected_output="""Caso a pergunta seja referente ao banco, preciso de uma resposta que apresente todos os dados obtidos pela query formulando a resposta a partir deles. 
     Caso ocorra uma pergunta que não tenha relação com as tabelas daily_report e project do banco de dados vinculado a você, com exceção de saudações, responda com seus conhecimentos gerais e ao fim diga sobre o que o banco de dados se trata e qual a função que você exerce dizendo que devem ser feitas perguntas relacionadas a isso para o assunto não se perder. 
     Se você encontrar a resposta no banco de dados, responda apenas a pergunta de elaborada, sem lembrar sua função no final.
-    A consulta SQL deve incluir as tabelas relevantes. Se ambas forem necessárias, a query deve ser um JOIN entre 'daily_report' e 'project'.
+    A consulta SQL deve incluir as tabelas relevantes. Se mais de uma forem necessárias, a query deve ser um JOIN entre as tables.
     Responda à pergunta de forma apropriada, seguindo as diretrizes acima.""",
     agent=sql_developer_agent,
     
