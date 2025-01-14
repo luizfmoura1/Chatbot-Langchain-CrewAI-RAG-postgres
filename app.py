@@ -2,7 +2,6 @@
 import os
 import streamlit as st
 import psycopg2
-import redis
 import numpy as np
 from utils.text_processing import processar_texto
 from langchain_community.chat_models import ChatOpenAI
@@ -11,9 +10,6 @@ from langchain.memory import ConversationBufferMemory
 from dotenv import load_dotenv
 from crewai import Agent, Task, Crew, Process
 from crewai_tools import tool
-from redis.commands.search.field import VectorField, TextField
-from redis.commands.search.indexDefinition import IndexDefinition, IndexType
-from redis.commands.search.query import Query
 
 load_dotenv()
 
@@ -272,114 +268,6 @@ def carregar_dados_postgresql():
     connection.close()
     return textos
 
-# Conexão com o Redis
-def conectar_redis():
-    client =  redis.Redis(host='localhost', port=6379, db=0,)
-    print(f'PING FUNCIONOU AQUI {client.ping()}')
-    return client
-
-def criar_indice_redis(redis_client):
-    idx = redis_client.ft(index_name="idx:embeddings")
-
-    try:
-        info = idx.info()
-        embedding_dim = info.get("attributes", [{}])[0].get("DIM", None)
-        if embedding_dim != 1536:
-            print(f"Índice existente com dimensão {embedding_dim}. Apagando e recriando...")
-            idx.dropindex(delete_documents=False)
-            raise Exception("Índice recriado devido a dimensão incorreta.")
-        print("Índice existente encontrado com dimensão correta.")
-    except Exception as e:
-        print(f"Erro ao verificar ou criar índice: {e}. Criando um novo índice...")
-        try:
-            idx.create_index(
-                fields=[
-                    VectorField(
-                        name="embedding",
-                        algorithm="FLAT",
-                        attributes={
-                            "TYPE": "VECTOR",
-                            "DIM": 1536,
-                            "DISTANCE_METRIC": "COSINE"
-                        }
-                    ),
-                    TextField("content")
-                ],
-                definition=IndexDefinition(prefix=["emb:"], index_type=IndexType.HASH)
-            )
-            print("Novo índice criado com sucesso.")
-        except Exception as e:
-            print(f"Erro ao criar índice no Redis: {e}")
-
-
-
-def armazenar_embeddings_redis(redis_client, embeddings, textos):
-    for idx, chunk in enumerate(textos):
-        # Verificar se o embedding já existe no Redis
-        if redis_client.exists(f"emb:{idx}"):
-            print(f"Embedding emb:{idx} já existe, pulando...")
-            continue
-
-        # Verificar se o chunk é válido
-        if not chunk.strip():
-            print(f"Chunk vazio ou inválido no índice {idx}, ignorando...")
-            continue
-
-        # Gerar o embedding para o novo chunk de texto
-        try:
-            embedding_vector = embeddings.embed_query(chunk)
-        except Exception as e:
-            print(f"Erro ao gerar embedding para o chunk {idx}: {e}")
-            continue
-
-        # Validar dimensão do embedding
-        if len(embedding_vector) != 1536:
-            print(f"Erro: Dimensão do embedding incorreta ({len(embedding_vector)}) no chunk {idx}, esperado 1536.")
-            continue
-
-        embedding_vector_bytes = np.array(embedding_vector, dtype=np.float32).tobytes()
-
-        # Armazenar o novo embedding no Redis
-        try:
-            redis_client.hset(
-                f"emb:{idx}",
-                mapping={
-                    "embedding": embedding_vector_bytes,
-                    "content": chunk
-                }
-            )
-            print(f"Novo embedding emb:{idx} armazenado com sucesso.")
-        except Exception as e:
-            print(f"Erro ao armazenar embedding emb:{idx}: {e}")
-
-
-
-def buscar_embeddings_redis(redis_client, embeddings, user_input, k=3):
-    try:
-        query_vector = embeddings.embed_query(user_input)
-        if len(query_vector) != 1536:
-            print(f"Erro: Dimensão do vetor de consulta incorreta ({len(query_vector)}), esperado 1536.")
-            return None
-
-        query_vector_bytes = np.array(query_vector, dtype=np.float32).tobytes()
-        search_query = Query(f"*=>[KNN {k} @embedding $vec]").sort_by("content").dialect(2)
-        params = {"vec": query_vector_bytes}
-
-        results = redis_client.ft("idx:embeddings").search(search_query, query_params=params)
-        if results is None or not hasattr(results, "docs"):
-            print("Nenhum resultado encontrado na busca.")
-            return None
-
-        print(f"{len(results.docs)} resultados encontrados no Redis.")
-        for doc in results.docs:
-            print(f"Resultado: {doc.id} - {doc.content[:100]}...")  # Exibe os primeiros 100 caracteres
-        return results
-    except Exception as e:
-        print(f"Erro ao buscar embeddings no Redis: {e}")
-        return None
-
-
-# Main com integração do CrewAI e Redis
 def main():
     st.set_page_config(page_title="💬 Chat-oppem", page_icon="🤖")
     st.title("OppemBOT 🤖")
@@ -402,17 +290,6 @@ def main():
         elif msg["role"] == "assistant":
             st.chat_message("assistant").write(msg["content"])
 
-    redis_client = conectar_redis()
-    criar_indice_redis(redis_client)
-
-    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY, model="text-embedding-ada-002")
-
-    # Verificar se embeddings estão carregados no Redis
-    if redis_client.exists("emb:0") == 0:
-        textos = carregar_dados_postgresql()
-        chunks = processar_texto(textos)
-        armazenar_embeddings_redis(redis_client, embeddings, chunks)
-
     user_input = st.chat_input("Você:")
 
     if user_input:
@@ -425,32 +302,18 @@ def main():
         else:
             graph_condition = False
 
-        # Busca no Redis com histórico
-        results = buscar_embeddings_redis(redis_client, embeddings, user_input)
+        try:
+            # Tentando buscar no banco de dados usando o agente
+            crew = configurar_agente_sql(chat_history=st.session_state["messages"])
+            result = crew.kickoff(inputs={'question': user_input, 'chat_history': st.session_state["messages"]})
+            result = vars(result)
+        except Exception as e:
+            print(f"Erro ao executar o agente: {e}")
+            result = None  # Garantir que result seja None caso ocorra erro
 
-        result = None  # Inicializando result como None
-
-        # Verifique se resultados existem e se a lista de docs não está vazia
-        if results and hasattr(results, "docs") and len(results.docs) > 0:
-            resposta = results.docs[0].content
-            st.session_state["messages"].append({"role": "assistant", "content": resposta})
-            st.chat_message("assistant").write(resposta)
-        else:
-            # Mensagem de depuração apenas no console, não no chat
-            print("Nenhum resultado encontrado no Redis. Tentando buscar no banco de dados...")
-
-            try:
-                # Tentando buscar no banco de dados usando o agente
-                crew = configurar_agente_sql(chat_history=st.session_state["messages"])
-                result = crew.kickoff(inputs={'question': user_input, 'chat_history': st.session_state["messages"]})
-                result = vars(result)
-            except Exception as e:
-                print(f"Erro ao executar o agente: {e}")
-                result = None  # Garantir que result seja None caso ocorra erro
-
-            if graph_condition:
-                if os.path.exists('graficos/graph.png'):
-                    os.remove('graficos/graph.png')
+        if graph_condition:
+            if os.path.exists('graficos/graph.png'):
+                os.remove('graficos/graph.png')
                     
                 # Configurar o agente de gráficos
                 graph_agent = Agent(
@@ -517,8 +380,6 @@ def main():
                     resposta = "Desculpe, não consegui encontrar a resposta no momento."
                     st.session_state["messages"].append({"role": "assistant", "content": resposta})
                     st.chat_message("assistant").write(resposta)
-
-
 
 
 if __name__ == "__main__":
