@@ -98,7 +98,6 @@ def configurar_agente_sql(chat_history=None):
         role='Postgres analyst senior',
         goal=f"""Responder perguntas relacionadas a RDOs e informações relacionadas. 
         Você deve usar queries SQL para extrair dados dessas tabelas e combiná-los, caso necessário.
-        Todas as tabelas são relacionadas pela coluna 'project_id' exceto na table 'project' que ao invés de ser 'project_id' nessa tabela é apenas 'id'.
         """,
         backstory = f"""
         Você é um analista experiente conectado a um banco que contém as seguintes tabelas: {daily_report_schema_info, project_schema_info, calculation_memory_schema_info, area_schema_info, daily_report_occurrency_schema_info, cart_schema_info, daily_report_activity_schema_info, daily_report_equipment_schema_info}
@@ -128,7 +127,8 @@ def configurar_agente_sql(chat_history=None):
             - 'in_review' = em aberto
             - 'in_approver' = em análise
 
-            - **ATENÇÃO** a column 'is_active' separa os RDOs ativos e excluidos, você **DEVE SEMPRE** ignorar em todas as suas consultas nessa table os RDOs que estejam com status 'false'
+            - **ATENÇÃO** a column 'is_active' separa os RDOs ativos e excluidos, você **DEVE SEMPRE** ignorar em todas as suas consultas, **apenas na table daily_report**, os RDOs que estejam com status 'false'.
+            - Você deve procurar pelos RDOs excluidos apenas se o usúario for bem específico em sua pergunta.
 
         2. Tema da tabela tenant_gerdau_com_br.project:
             - ID da obra (column id)
