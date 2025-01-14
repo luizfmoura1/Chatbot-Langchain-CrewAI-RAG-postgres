@@ -19,25 +19,27 @@ load_dotenv()
 
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
-# Conexão com o PostgreSQL
-def conectar_postgresql():
-    try:
-        connection = psycopg2.connect(
-            host='localhost',
-            database='gerdau',
-            user='luiz',
-            password='CgvQTiyXXEN7xSnsMHBkT5NW2MaxtC',
-            port=5432
-        )
-        print("Conexão com o PostgreSQL estabelecida com sucesso.")
-        return connection
-    except Exception as e:
-        st.error(f"Erro ao conectar ao PostgreSQL: {e}")
-        st.stop()
+def get_pg_connection():
+    """Garante uma única conexão ativa com o PostgreSQL no st.session_state."""
+    if "pg_connection" not in st.session_state or st.session_state.pg_connection.closed:
+        try:
+            st.session_state.pg_connection = psycopg2.connect(
+                host='localhost',
+                database='gerdau',
+                user='luiz',
+                password='CgvQTiyXXEN7xSnsMHBkT5NW2MaxtC',
+                port=5432
+            )
+            print("Conexão com o PostgreSQL estabelecida com sucesso.")
+        except Exception as e:
+            st.error(f"Erro ao conectar ao PostgreSQL: {e}")
+            st.stop()
+    return st.session_state.pg_connection
+
 
 def get_table_schema(table_name):
     """Obtém o esquema (colunas) de uma tabela específica no PostgreSQL."""
-    connection = conectar_postgresql()
+    connection = get_pg_connection()
     cursor = connection.cursor()
     cursor.execute(f"""
         SELECT column_name
@@ -46,21 +48,20 @@ def get_table_schema(table_name):
     """)
     columns = cursor.fetchall()
     cursor.close()
-    connection.close()
     return [column[0] for column in columns]
 
 
 @tool("Execute multi-table query")
 def run_query_multi_table(query: str):
     """Executa uma query SQL envolvendo múltiplas tabelas."""
-    connection = conectar_postgresql()
+    connection = get_pg_connection()
     cursor = connection.cursor()
     print(f"Executing query: {query}")
     cursor.execute(query)
     result = cursor.fetchall()
     cursor.close()
-    connection.close()
     return result
+
 
 
 def configurar_agente_sql(chat_history=None):
