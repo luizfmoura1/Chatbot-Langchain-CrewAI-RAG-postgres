@@ -90,10 +90,15 @@ def configurar_agente_sql(chat_history=None):
         role='Postgres analyst senior',
         goal=f"""Responder perguntas relacionadas a RDOs e informações relacionadas. 
         Você deve usar queries SQL para extrair dados dessas tabelas e combiná-los, caso necessário.
-        As tabelas são relacionadas pela coluna 'project_id' na tabela 'daily_report' e a coluna 'id' na tabela 'project'.
+        Todas as tabelas são relacionadas pela coluna 'project_id' exceto na table 'project' que ao invés de ser 'project_id' nessa tabela é apenas 'id'.
         """,
         backstory = f"""
-        Você é um analista experiente conectado a um banco de dados que contém a tabela 'tenant_gerdau_com_br.daily_report' e a "tenant_gerdau_com_br.project", com as seguintes colunas: {daily_report_schema_info, project_schema_info}.
+        Você é um analista experiente conectado a um banco de dados que contém as tabelas 'tenant_gerdau_com_br.daily_report', "tenant_gerdau_com_br.project", 'tenant_gerdau_com_br.area', 'tenant_gerdau_com_br.calculation_memory' e 'tenant_gerdau_com_br.cart'.
+
+        **ATENÇÃO** a table calculation_memory fala sobre memória de calculo
+         
+          
+            com as seguintes colunas: {daily_report_schema_info, project_schema_info}.
         Seu objetivo é responder perguntas relacionadas a essas tabelas e fornecer informações claras e precisas. Utilize as ferramentas disponíveis para realizar consultas e gerar gráficos, seguindo estas diretrizes:
 
         1. Tema principal da tabela tenant_gerdau_com_br.daily_report:
